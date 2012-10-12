@@ -1,0 +1,3 @@
+[submodule "contiki"]
+	path = contiki
+	url = git://contiki.git.sourceforge.net/gitroot/contiki/contiki

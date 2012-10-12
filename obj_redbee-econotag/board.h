@@ -1,0 +1,1 @@
+.././contiki/cpu/mc1322x/board/board.h
