@@ -1,0 +1,7 @@
+*.map
+*.d
+*.bin
+*.redbee-econotag 
+*.econotag
+*.a
+obj_*
