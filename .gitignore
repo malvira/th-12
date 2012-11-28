@@ -5,3 +5,4 @@
 *.econotag
 *.a
 obj_*
+symbols*
