@@ -8,12 +8,16 @@
 #include "th-12.h"
 #include "dht.h"
 
+/* rplstats */
+#include "httpd-ws.h"
+#include "rplstats.h"
+
 /* debug */
 #define DEBUG DEBUG_ANNOTATE
 #include "net/uip-debug.h"
 
 PROCESS(th_12, "Temp/Humid Sensor");
-AUTOSTART_PROCESSES(&th_12);
+AUTOSTART_PROCESSES(&th_12, &rplstats);
 
 struct etimer et_do_dht;
 
@@ -23,6 +27,13 @@ void do_result( dht_result_t d) {
 	ANNOTATE("vbatt: %dmV ", adc_vbatt);
 	ANNOTATE("a5: %4dmV, a6: %4dmV ", adc_voltage(5), adc_voltage(6));
 	ANNOTATE("\n\r");
+}
+
+
+httpd_ws_script_t
+httpd_ws_get_script(struct httpd_ws_state *s)
+{
+  return NULL;
 }
 
 PROCESS_THREAD(th_12, ev, data)

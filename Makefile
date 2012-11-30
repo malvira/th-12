@@ -1,6 +1,9 @@
 all: th-12 
 
 CONTIKI=./contiki
+APPS += rplstats httpd-ws
+
+APPDIRS += ${addprefix apps/, $(APPS)}
 
 # variable for root Makefile.include
 WITH_UIP6=1
