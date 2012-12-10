@@ -58,13 +58,13 @@ uint16_t create_dht_msg(char *buf)
 	rpl_dag_t *dag;
 	uint8_t n = 0;
 	buf_lock = 1;
-	n += sprintf(&(buf[n]),"{\"t\":\"%d.%dC\", \"h\": \"%d.%d%%\", \"vb\":\"%dmV\" }", 
-		     dht_current.t_i,
-		     dht_current.t_d,
-		     dht_current.rh_i,
-		     dht_current.rh_d,
-		     adc_vbatt
-		);
+	/* n += sprintf(&(buf[n]),"{\"t\":\"%d.%dC\", \"h\": \"%d.%d%%\", \"vb\":\"%dmV\" }",  */
+	/* 	     dht_current.t_i, */
+	/* 	     dht_current.t_d, */
+	/* 	     dht_current.rh_i, */
+	/* 	     dht_current.rh_d, */
+	/* 	     adc_vbatt */
+	/* 	); */
 	buf[n] = 0;
 	PRINTF("buf: %s\n", buf);
 	return n;
@@ -109,15 +109,13 @@ PROCESS_THREAD(do_post, ev, data)
 void do_result( dht_result_t d) {
 	adc_service();
 
-	dht_current.t_i = d.t_i;
-	dht_current.t_d = d.t_d;
-	dht_current.rh_i = d.rh_i;
-	dht_current.rh_d = d.rh_d;
+	dht_current.t = d.t;
+	dht_current.rh = d.rh;
 
-//	ANNOTATE("temp: %2d.%02dC humid: %2d.%02d%%, ", d.t_i, d.t_d, d.rh_i, d.rh_d);
-//	ANNOTATE("vbatt: %dmV ", adc_vbatt);
-//	ANNOTATE("a5: %4dmV, a6: %4dmV ", adc_voltage(5), adc_voltage(6));
-//	ANNOTATE("\n\r");
+	ANNOTATE("temp: %2d.%02dC humid: %2d.%02d%%, ", d.t/10, d.t % 10, d.rh / 10, d.rh % 10);
+	ANNOTATE("vbatt: %dmV ", adc_vbatt);
+	ANNOTATE("a5: %4dmV, a6: %4dmV ", adc_voltage(5), adc_voltage(6));
+	ANNOTATE("\n\r");
 
 	process_start(&do_post, NULL);
 

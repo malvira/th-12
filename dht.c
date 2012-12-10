@@ -1,3 +1,9 @@
+/* This code is for the whit DHT22 sensor */
+/* The blue sensor has slightly different byte format */
+/* but the humidity numbers are too bad from it to use for anything */
+/* could make an ok temp sensor but you are better off rolling your own with a thermistor */
+/* opamp and LUT */
+
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +16,7 @@
 
 /* debug */
 /* commented out since it can conflict with the debug setting in th-12.c */
-#define DEBUG DEBUG_NONE 
+#define DEBUG DEBUG_NONE
 #include "net/uip-debug.h" 
 
 #define setdo(x) GPIO->PAD_DIR_SET.x=1
@@ -100,11 +106,17 @@ PROCESS_THREAD(read_dht, ev, data)
 	
 	PRINTF("pulling low to start dht\n\r");
 	dht_idx = 0;
-	gpio_reset(TMR1);
 
 	/* keep pin low for at least 18ms */
-	etimer_set(&et_dht, 0.05 * CLOCK_SECOND);
+	gpio_reset(TMR1);
+	etimer_set(&et_dht, 0.01 * CLOCK_SECOND);
 	while (!etimer_expired(&et_dht)) { PROCESS_PAUSE(); }
+
+	/* pull high */
+	/* PRINTF("pulling high\n\r"); */
+	/* gpio_set(TMR1); */
+	/* etimer_set(&et_dht, 0.01 * CLOCK_SECOND); */
+	/* while (!etimer_expired(&et_dht)) { PROCESS_PAUSE(); } */
 
 	PRINTF("set high impedance to start listening\n\r");
 	DHT_PU();
@@ -156,12 +168,18 @@ PROCESS_THREAD(read_dht, ev, data)
 		PRINTF("sum = %04x\n\r", dht[0] + dht[1] + dht[2] + dht[3]);
 		
 		if( dht_result && (dht[4] == (uint8_t)(dht[0] + dht[1] + dht[2] + dht[3]))) { 
-			d.ok = 1;
-			d.rh_i = dht[0];
-			d.rh_d = dht[1];
-			d.t_i = dht[2];
-			d.t_d = dht[3];
-			dht_result(d);
+		  int16_t temp;
+		  uint16_t t;
+		  d.ok = 1;
+		  d.rh = dht[0] << 8 | dht[1];
+		  t = dht[2] << 8 | dht[3];
+		  if (dht[2] & 0x80) {
+		    temp = -1 * t;
+		  } else {
+		    temp = t;
+		  }
+		  d.t = temp;
+		  dht_result(d);
 		}
 
 		PROCESS_EXIT();

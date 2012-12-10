@@ -16,11 +16,9 @@
 	GPIO->FUNC_SEL.TMR1=3;\
 
 typedef struct dht_result {
-	uint8_t rh_i; /* relative humidity in %: integer portion */
-	uint8_t rh_d; /* RH%: decimal portion */
-	uint8_t t_i;  /* temp in C: integer portion */
-	uint8_t t_d;  /* temp decimal portion */
-	uint8_t ok;   /* equals 1 if checksum was ok */
+	uint16_t rh; /* relative humidity in % * 10 */
+	int16_t t;   /* temp in C * 10 */
+	uint8_t ok;  /* equals 1 if checksum was ok */
 } dht_result_t;
 
 PROCESS_NAME(read_dht);
