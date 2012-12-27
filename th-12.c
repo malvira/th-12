@@ -43,7 +43,19 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 {
 	rpl_dag_t *dag;
 	uint8_t n = 0;
-	n += sprintf(&(buf[n]),"{\"t\":\"%2d.%02dC\",\"h\":\"%2d.%02d%%\",\"vb\":\"%dmV\"}",
+	rimeaddr_t *addr;
+
+	addr = &rimeaddr_node_addr;
+
+	n += sprintf(&(buf[n]),"{\"eui\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"t\":\"%2d.%02dC\",\"h\":\"%2d.%02d%%\",\"vb\":\"%dmV\"}",
+		     addr->u8[0],
+		     addr->u8[1],
+		     addr->u8[2],
+		     addr->u8[3],
+		     addr->u8[4],
+		     addr->u8[5],
+		     addr->u8[6],
+		     addr->u8[7],
 		     d->t  / 10,
 		     d->t  % 10,
 		     d->rh / 10,
@@ -115,13 +127,13 @@ PROCESS_THREAD(th_12, ev, data)
 	adc_setup_chan(5);
 	adc_setup_chan(6);
 	
-	etimer_set(&et_do_dht, 1 * CLOCK_SECOND);
+	etimer_set(&et_do_dht, 30 * CLOCK_SECOND);
 
 	while(1) {
 		PROCESS_WAIT_EVENT();
 
 		if(etimer_expired(&et_do_dht)) {
-			etimer_set(&et_do_dht, 1 * CLOCK_SECOND);
+			etimer_set(&et_do_dht, 30 * CLOCK_SECOND);
 			process_start(&read_dht, NULL);
 		}		
 
