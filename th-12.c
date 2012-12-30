@@ -61,7 +61,7 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 	  frac_t = d->t % 10;
 	}
 
-	n += sprintf(&(buf[n]),"{\"eui\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"t\":\"%c%d.%02dC\",\"h\":\"%2d.%02d%%\",\"vb\":\"%dmV\"}",
+	n += sprintf(&(buf[n]),"{\"eui\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"t\":\"%c%d.%dC\",\"h\":\"%d.%d%%\",\"vb\":\"%dmV\"}",
 		     addr->u8[0],
 		     addr->u8[1],
 		     addr->u8[2],
@@ -130,7 +130,7 @@ void do_result( dht_result_t d) {
 	}
 #endif
 
-	ANNOTATE("temp: %c%d.%02dC humid: %2d.%02d%%, ", neg, int_t, frac_t, d.rh / 10, d.rh % 10);
+	ANNOTATE("temp: %c%d.%dC humid: %d.%d%%, ", neg, int_t, frac_t, d.rh / 10, d.rh % 10);
 	ANNOTATE("vbatt: %dmV ", adc_vbatt);
 	ANNOTATE("a5: %4dmV, a6: %4dmV ", adc_voltage(5), adc_voltage(6));
 	ANNOTATE("\n\r");
