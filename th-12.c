@@ -23,6 +23,8 @@
 #include "th-12.h"
 #include "dht.h"
 
+#define POST_INTERVAL (30 * CLOCK_SECOND)
+
 /* debug */
 #define DEBUG DEBUG_FULL
 #include "net/uip-debug.h"
@@ -44,10 +46,22 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 	rpl_dag_t *dag;
 	uint8_t n = 0;
 	rimeaddr_t *addr;
+	uint16_t frac_t, int_t;
+	char neg = ' ';
 
 	addr = &rimeaddr_node_addr;
 
-	n += sprintf(&(buf[n]),"{\"eui\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"t\":\"%2d.%02dC\",\"h\":\"%2d.%02d%%\",\"vb\":\"%dmV\"}",
+	if(d->t < 0) {
+	  neg = '-';
+	  int_t = (-1 * d->t)/10;
+	  frac_t = (-1 * d->t) % 10;
+	} else {
+	  neg = ' ';
+	  int_t = d->t/10;
+	  frac_t = d->t % 10;
+	}
+
+	n += sprintf(&(buf[n]),"{\"eui\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"t\":\"%c%d.%02dC\",\"h\":\"%2d.%02d%%\",\"vb\":\"%dmV\"}",
 		     addr->u8[0],
 		     addr->u8[1],
 		     addr->u8[2],
@@ -56,8 +70,9 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 		     addr->u8[5],
 		     addr->u8[6],
 		     addr->u8[7],
-		     d->t  / 10,
-		     d->t  % 10,
+		     neg,
+		     int_t,
+		     frac_t,
 		     d->rh / 10,
 		     d->rh % 10,
 		     adc_vbatt
@@ -95,12 +110,27 @@ PROCESS_THREAD(do_post, ev, data)
 }
 
 void do_result( dht_result_t d) {
+	uint16_t frac_t, int_t;
+	char neg = ' ';
+
 	adc_service();
 
 	dht_current.t = d.t;
 	dht_current.rh = d.rh;
 
-	ANNOTATE("temp: %2d.%02dC humid: %2d.%02d%%, ", d.t/10, d.t % 10, d.rh / 10, d.rh % 10);
+#if DEBUG_ANNOTATE || DEBUG_FULL
+	if(d.t < 0) {
+	  neg = '-';
+	  int_t = (-1 * d.t)/10;
+	  frac_t = (-1 * d.t) % 10;
+	} else {
+	  neg = ' ';
+	  int_t = d.t/10;
+	  frac_t = d.t % 10;
+	}
+#endif
+
+	ANNOTATE("temp: %c%d.%02dC humid: %2d.%02d%%, ", neg, int_t, frac_t, d.rh / 10, d.rh % 10);
 	ANNOTATE("vbatt: %dmV ", adc_vbatt);
 	ANNOTATE("a5: %4dmV, a6: %4dmV ", adc_voltage(5), adc_voltage(6));
 	ANNOTATE("\n\r");
@@ -127,13 +157,13 @@ PROCESS_THREAD(th_12, ev, data)
 	adc_setup_chan(5);
 	adc_setup_chan(6);
 	
-	etimer_set(&et_do_dht, 30 * CLOCK_SECOND);
+	etimer_set(&et_do_dht, POST_INTERVAL);
 
 	while(1) {
 		PROCESS_WAIT_EVENT();
 
 		if(etimer_expired(&et_do_dht)) {
-			etimer_set(&et_do_dht, 30 * CLOCK_SECOND);
+			etimer_set(&et_do_dht, POST_INTERVAL);
 			process_start(&read_dht, NULL);
 		}		
 

@@ -172,7 +172,8 @@ PROCESS_THREAD(read_dht, ev, data)
 		  uint16_t t;
 		  d.ok = 1;
 		  d.rh = dht[0] << 8 | dht[1];
-		  t = dht[2] << 8 | dht[3];
+
+		  t = (dht[2] & 0x7f) << 8 | dht[3];
 		  if (dht[2] & 0x80) {
 		    temp = -1 * t;
 		  } else {
