@@ -26,6 +26,11 @@
 #define POST_INTERVAL (10 * CLOCK_SECOND)
 #define ON_POWER_WAKE_TIME (30 * CLOCK_SECOND)
 
+/* How long to wait before sleeping after starting the coap post */
+/* will also sleep if a response to the post is recieved */
+/* should be as short as possible */
+#define SLEEP_AFTER_POST (0.05 * CLOCK_SECOND)
+
 /* debug */
 #define DEBUG DEBUG_FULL
 #include "net/uip-debug.h"
@@ -44,8 +49,18 @@ uip_ipaddr_t server_ipaddr;
 /* value of sleep_ok determines if it is ok to sleep */
 static uint8_t sleep_ok = 0;
 
+/* lock posting while they happen --- coap can take 62 secs to timeout and we don't want to queue many posts at a time */
+static uint8_t post_ok = 1;
+
+/* post_timed_out is cleared by the post callback routine. */
+/* the callback routine isn't called if it never gets a response */
+static uint8_t post_timed_out = 1;
+
 /* time the next post is scheduled for: used to calculate how long to sleep */
 static clock_time_t next_post;
+
+/* used to go to sleep */
+static struct ctimer ct_sleep;
 
 char buf[64];
 
@@ -90,14 +105,34 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 	return n;
 }
 
+PROCESS_NAME(do_post);
+
+void
+go_to_sleep(void *ptr)
+{
+	PRINTF("go to sleep\n\r");
+	if(sleep_ok) {
+		/* sleep until we need to post */
+		dht_uninit();
+		rtimer_arch_sleep((next_post - clock_time() - 2) * (rtc_freq/CLOCK_CONF_SECOND));
+		/* adjust the clock */
+		clock_adjust_ticks(CRM->WU_COUNT/CLOCK_CONF_SECOND);
+		dht_init();
+	}
+	process_exit(&do_post);
+	post_ok = 1;
+}
+
 /* This function is will be passed to COAP_BLOCKING_REQUEST() to handle responses. */
 void
 client_chunk_handler(void *response)
 {
   uint8_t *chunk;
 
+	ctimer_stop(&ct_sleep);
   int len = coap_get_payload(response, &chunk);
   printf("|%.*s", len, (char *)chunk);
+	go_to_sleep(NULL);
 }
 
 PROCESS(do_post, "post results");
@@ -107,29 +142,25 @@ PROCESS_THREAD(do_post, ev, data)
 	static coap_packet_t request[1]; /* This way the packet can be treated as pointer as usual. */
 	SERVER_NODE(&server_ipaddr);
 
-	coap_init_message(request, COAP_TYPE_CON, COAP_POST, 0 );
+	PRINTF("do post\n\r");
+
+	/* we do a NON post since a CON could take 60 seconds to time out and we don't want to stay awake that long */
+	coap_init_message(request, COAP_TYPE_NON, COAP_POST, 0 );
 	coap_set_header_uri_path(request, "/th12");
 	
 	coap_set_payload(request, buf, strlen(buf));
 
-	/* lock doing more posts also until this finishes */
-	sleep_ok = 0;
+	/* there is no good way to know if a NON request has finished */
+	/* if it sucessful we might get a response back in client_chuck_handler */
+	/* if we don't get a response back then we need to timeout and go back to sleep (potentially for a longer time than normal) */
+	/* in fact, we don't really care about the response at all. A response just lets us go to sleep quicker (maybe) */
+	/* the request should really go out within 50ms, so we will wait for that and then sleep */
+	/* a one hop request will probably come back faster... */
+
+	ctimer_set(&ct_sleep, SLEEP_AFTER_POST, go_to_sleep, NULL);
+
 	COAP_BLOCKING_REQUEST(&server_ipaddr, REMOTE_PORT, request, client_chunk_handler);
 	PRINTF("status %u: %s\n", coap_error_code, coap_error_message);
-	sleep_ok = 1; /* it could take a while to get here if all tranmissions fail */
-
-	/* should check if this try failed */
-	/* if so, sleep for a while before trying again */
-
-	if(sleep_ok) {
-		/* sleep until we need to post */
-		dht_uninit();
-//		rtimer_arch_sleep((next_post - clock_time() - 2) * (rtc_freq/CLOCK_CONF_SECOND));
-		/* adjust the clock */
-//		clock_adjust_ticks(CRM->WU_COUNT/CLOCK_CONF_SECOND);
-		dht_init();
-	}
-
 	
 	PROCESS_END();
 }
@@ -204,7 +235,11 @@ PROCESS_THREAD(th_12, ev, data)
 		if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
 			next_post = clock_time() + POST_INTERVAL;
 			etimer_set(&et_do_dht, POST_INTERVAL);
-			process_start(&read_dht, NULL);
+			if(post_ok == 1) {
+				/* lock doing more posts also until this finishes */
+				post_ok = 0;
+				process_start(&read_dht, NULL);
+			}
 		}		
 
 	} 
