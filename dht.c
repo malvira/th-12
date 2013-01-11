@@ -204,3 +204,8 @@ void dht_init(void)
 	enable_irq(TMR);	
 }
 
+void dht_uninit(void)
+{
+	setdi(KBI1);
+	setdi(TMR1);
+}

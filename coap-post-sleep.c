@@ -23,21 +23,29 @@
 #include "th-12.h"
 #include "dht.h"
 
-#define POST_INTERVAL (30 * CLOCK_SECOND)
+#define POST_INTERVAL (10 * CLOCK_SECOND)
+#define ON_POWER_WAKE_TIME (30 * CLOCK_SECOND)
 
 /* debug */
 #define DEBUG DEBUG_FULL
 #include "net/uip-debug.h"
 
 #define REMOTE_PORT     UIP_HTONS(COAP_DEFAULT_PORT)
-#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2002, 0x3239, 0x614b, 0, 0, 0, 0, 1)
+//#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2002, 0x3239, 0x614b, 0, 0, 0, 0, 1)
+#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0xaaaa, 0x0000, 0x0000, 0, 0, 0, 0, 1)
 
 PROCESS(th_12, "Temp/Humid Sensor");
 AUTOSTART_PROCESSES(&th_12);
 
-struct etimer et_do_dht;
+struct etimer et_do_dht, et_poweron_timeout;
 static dht_result_t dht_current;
 uip_ipaddr_t server_ipaddr;
+
+/* value of sleep_ok determines if it is ok to sleep */
+static uint8_t sleep_ok = 0;
+
+/* time the next post is scheduled for: used to calculate how long to sleep */
+static clock_time_t next_post;
 
 char buf[64];
 
@@ -98,14 +106,31 @@ PROCESS_THREAD(do_post, ev, data)
 	PROCESS_BEGIN();
 	static coap_packet_t request[1]; /* This way the packet can be treated as pointer as usual. */
 	SERVER_NODE(&server_ipaddr);
-	
+
 	coap_init_message(request, COAP_TYPE_CON, COAP_POST, 0 );
 	coap_set_header_uri_path(request, "/th12");
 	
 	coap_set_payload(request, buf, strlen(buf));
-	       	
-	COAP_BLOCKING_REQUEST(&server_ipaddr, REMOTE_PORT, request, client_chunk_handler);
 
+	/* lock doing more posts also until this finishes */
+	sleep_ok = 0;
+	COAP_BLOCKING_REQUEST(&server_ipaddr, REMOTE_PORT, request, client_chunk_handler);
+	PRINTF("status %u: %s\n", coap_error_code, coap_error_message);
+	sleep_ok = 1; /* it could take a while to get here if all tranmissions fail */
+
+	/* should check if this try failed */
+	/* if so, sleep for a while before trying again */
+
+	if(sleep_ok) {
+		/* sleep until we need to post */
+		dht_uninit();
+//		rtimer_arch_sleep((next_post - clock_time() - 2) * (rtc_freq/CLOCK_CONF_SECOND));
+		/* adjust the clock */
+//		clock_adjust_ticks(CRM->WU_COUNT/CLOCK_CONF_SECOND);
+		dht_init();
+	}
+
+	
 	PROCESS_END();
 }
 
@@ -140,6 +165,14 @@ void do_result( dht_result_t d) {
 	process_start(&do_post, NULL);
 }
 
+static struct ctimer ct_powerwake;
+void
+set_sleep_ok(void *ptr)
+{
+	PRINTF("Power ON wake timeout expired. Ok to sleep\n\r");
+	sleep_ok = 1;
+}
+
 PROCESS_THREAD(th_12, ev, data)
 {
 	PROCESS_BEGIN();
@@ -151,18 +184,25 @@ PROCESS_THREAD(th_12, ev, data)
 
 	register_dht_result(do_result);
 	
-	PRINTF("Temp/Humid Sensor\n\r");
+	PRINTF("Sleeping Temp/Humid Sensor\n\r");
+
+#ifdef RPL_LEAF_ONLY
+	PRINTF("RPL LEAF ONLY\n\r");
+#endif
 	
 	dht_init();
 	adc_setup_chan(5);
 	adc_setup_chan(6);
-	
+
 	etimer_set(&et_do_dht, POST_INTERVAL);
+	ctimer_set(&ct_powerwake, ON_POWER_WAKE_TIME, set_sleep_ok, NULL);
 
 	while(1) {
+
 		PROCESS_WAIT_EVENT();
 
-		if(etimer_expired(&et_do_dht)) {
+		if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
+			next_post = clock_time() + POST_INTERVAL;
 			etimer_set(&et_do_dht, POST_INTERVAL);
 			process_start(&read_dht, NULL);
 		}		

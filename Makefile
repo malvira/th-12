@@ -1,9 +1,24 @@
-all: th-12 
+all: 
+	make TARGET=th12 coap-post
+	make TARGET=th12-lowpower coap-post-sleep
 
-CONTIKI=./contiki
+coap-post-sleep: TARGET=th12-lowpower 
+coap-post-sleep: DEFINES += PROJECT_CONF_H=\"lowpower-conf.h\"
+
+clean:
+	make TARGET=th12 clean
+	make TARGET=th12-lowpower clean
+
+ifndef TARGET
+TARGET=th12
+endif
+
+CONTIKI=../tests/contiki
+
 APPS += er-coap-07 erbium
-
 APPDIRS += ${addprefix apps/, $(APPS)}
+
+TARGETDIRS += ./targets
 
 CFLAGS += -DWITH_COAP=7
 CFLAGS += -DREST=coap_rest_implementation
