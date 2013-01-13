@@ -210,6 +210,8 @@ void dht_init(void)
 
 void dht_uninit(void)
 {
-	setdi(KBI1);
-	setdi(TMR1);
+	CRM->WU_CNTLbits.EXT_OUT_POL = 0; /* drive KBI0-3 low during sleep */
+	gpio_reset(KBI1);
+	setdo(TMR1);
+	gpio_set(TMR1);
 }
