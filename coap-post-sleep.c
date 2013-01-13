@@ -36,8 +36,8 @@
 #include "net/uip-debug.h"
 
 #define REMOTE_PORT     UIP_HTONS(COAP_DEFAULT_PORT)
-//#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2002, 0x3239, 0x614b, 0, 0, 0, 0, 1)
-#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0xaaaa, 0x0000, 0x0000, 0, 0, 0, 0, 1)
+#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2002, 0xc63d, 0xeeef, 0, 0, 0, 0, 1)
+//#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0xaaaa, 0x0000, 0x0000, 0, 0, 0, 0, 1)
 
 PROCESS(th_12, "Temp/Humid Sensor");
 AUTOSTART_PROCESSES(&th_12);
@@ -204,6 +204,8 @@ set_sleep_ok(void *ptr)
 	sleep_ok = 1;
 }
 
+static rpl_dag_t *dag;
+
 PROCESS_THREAD(th_12, ev, data)
 {
 	PROCESS_BEGIN();
@@ -228,6 +230,8 @@ PROCESS_THREAD(th_12, ev, data)
 	etimer_set(&et_do_dht, POST_INTERVAL);
 	ctimer_set(&ct_powerwake, ON_POWER_WAKE_TIME, set_sleep_ok, NULL);
 
+	dag = NULL;
+
 	while(1) {
 
 		PROCESS_WAIT_EVENT();
@@ -235,7 +239,22 @@ PROCESS_THREAD(th_12, ev, data)
 		if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
 			next_post = clock_time() + POST_INTERVAL;
 			etimer_set(&et_do_dht, POST_INTERVAL);
-			if(post_ok == 1) {
+
+			if(dag == NULL) {
+				dag = rpl_get_any_dag();
+				if (dag != NULL) {
+					uip_ipaddr_t *addr;
+					addr = &(dag->prefix_info.prefix);
+					/* assume 64 bit prefix for now */
+					memcpy(&server_ipaddr, addr, sizeof(uip_ipaddr_t));
+					server_ipaddr.u16[7] = UIP_HTONS(1);
+					PRINTF("joined DAG. Posting to ");
+					PRINT6ADDR(&server_ipaddr);
+					PRINTF("\n\r");
+				}
+			}
+
+			if(dag != NULL && post_ok == 1) {
 				/* lock doing more posts also until this finishes */
 				post_ok = 0;
 				process_start(&read_dht, NULL);
