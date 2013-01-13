@@ -55,7 +55,11 @@ void tmr1_isr(void) {
 }
 
 void tmr1_init(void) {
-	TMR1->ENBLbits.ENBL1 = 0;
+
+	/* this is necessary for the TMR1 capt to work... not sure why */
+	*TMR0_CTRL = (1 << 13); /* set count mode to count rising edges of primary source */
+
+	*TMR_ENBL = 0; /* disable timers */
 	TMR1->CTRLbits = (struct TMR_CTRL) {
 		.COUNT_MODE = 1,           /* count rising edges of primary source (should be 24MHz) */
 		.PRIMARY_CNT_SOURCE = 0xc, /* primary source divided by 16 */
@@ -83,7 +87,7 @@ void tmr1_init(void) {
 	TMR1->LOAD = 0;                    /* load in 0 */
 	TMR1->COMP1 = 0XFFFF;              /* set compare to max */
 	TMR1->CNTR = 0;                    /* start counter at 0 */
-	TMR1->ENBLbits.ENBL1 = 1;          /* enable TMR1 */
+	*TMR_ENBL = 0x2; /* enable only timer 1 */
 }
 
 /* signals the dht to send data back */
