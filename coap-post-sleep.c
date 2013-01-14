@@ -36,8 +36,6 @@
 #include "net/uip-debug.h"
 
 #define REMOTE_PORT     UIP_HTONS(COAP_DEFAULT_PORT)
-//#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2002, 0xc63d, 0xeeef, 0, 0, 0, 0, 1)
-#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0xaaaa, 0x0000, 0x0000, 0, 0, 0, 0, 1)
 
 PROCESS(th_12, "Temp/Humid Sensor");
 AUTOSTART_PROCESSES(&th_12);
@@ -141,7 +139,6 @@ PROCESS_THREAD(do_post, ev, data)
 {
 	PROCESS_BEGIN();
 	static coap_packet_t request[1]; /* This way the packet can be treated as pointer as usual. */
-	SERVER_NODE(&server_ipaddr);
 
 	PRINTF("do post\n\r");
 
