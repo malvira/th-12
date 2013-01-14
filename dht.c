@@ -23,7 +23,6 @@
 #define setdi(x) GPIO->PAD_DIR_RESET.x=1
 
 #define MAX_SAMPLES 64
-#define BIT_OFFSET 2            /* bits to offset from the raw data */
 uint16_t dht_time[MAX_SAMPLES]; /* dht11 returns 40 pulses, allocate a little extra just in case */
 uint8_t dht_idx;                /* current index into the results buffer */
 
@@ -106,6 +105,7 @@ PROCESS(read_dht, "read dht");
 PROCESS_THREAD(read_dht, ev, data)
 {
 	dht_result_t d;
+	uint8_t bit_offset;
 	PROCESS_BEGIN();
 	
 	PRINTF("pulling low to start dht\n\r");
@@ -150,12 +150,21 @@ PROCESS_THREAD(read_dht, ev, data)
 		PRINTF("\n\r");
 #endif
 
+		/* find the first pulse */
+		/* while running data looks like: data: 55400 122 40 ... */
+		/* on power up though, we get: data:  122 40 40 40 */
+		if(dht_time[0] > 5000) {
+			bit_offset = 2;
+		} else {
+			bit_offset = 1;
+		}
+
 		/* convert pulse width encoded data in to bits */
 		/* and pack them into bytes */
-		for (i = BIT_OFFSET; i < DHT_BITS + BIT_OFFSET; i ++) {
+		for (i = bit_offset; i < DHT_BITS + bit_offset; i ++) {
 #ifdef DEBUG_FULL
 			/* print packed bytes */
-			if(((i-BIT_OFFSET) % 8) == 0 && (i-BIT_OFFSET > 7)) { PRINTF(" = 0x%02x\n\r", dht[((i-BIT_OFFSET)/8) - 1]); }
+			if(((i-bit_offset) % 8) == 0 && (i-bit_offset > 7)) { PRINTF(" = 0x%02x\n\r", dht[((i-bit_offset)/8) - 1]); }
 #endif
 			
 			/* threshold times into bits */
@@ -164,8 +173,8 @@ PROCESS_THREAD(read_dht, ev, data)
 			PRINTF("%d", val);
 
 			/* pack */
-			dht[(i-BIT_OFFSET)/8] <<= 1;
-			dht[(i-BIT_OFFSET)/8] |= val;
+			dht[(i-bit_offset)/8] <<= 1;
+			dht[(i-bit_offset)/8] |= val;
 		}				
 		PRINTF(" = 0x%02x\n\r", dht[4]);
 		PRINTF("%02x %02x %02x %02x %02x\n\r", dht[0], dht[1], dht[2], dht[3], dht[4]);
