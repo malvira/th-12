@@ -245,6 +245,10 @@ PROCESS_THREAD(th_12, ev, data)
 					addr = &(dag->prefix_info.prefix);
 					/* assume 64 bit prefix for now */
 					memcpy(&server_ipaddr, addr, sizeof(uip_ipaddr_t));
+					server_ipaddr.u16[3] = 0;
+					server_ipaddr.u16[4] = 0;
+					server_ipaddr.u16[5] = 0;
+					server_ipaddr.u16[6] = 0;
 					server_ipaddr.u16[7] = UIP_HTONS(1);
 					PRINTF("joined DAG. Posting to ");
 					PRINT6ADDR(&server_ipaddr);
