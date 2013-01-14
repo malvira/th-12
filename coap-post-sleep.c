@@ -36,8 +36,8 @@
 #include "net/uip-debug.h"
 
 #define REMOTE_PORT     UIP_HTONS(COAP_DEFAULT_PORT)
-#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2002, 0xc63d, 0xeeef, 0, 0, 0, 0, 1)
-//#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0xaaaa, 0x0000, 0x0000, 0, 0, 0, 0, 1)
+//#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2002, 0xc63d, 0xeeef, 0, 0, 0, 0, 1)
+#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0xaaaa, 0x0000, 0x0000, 0, 0, 0, 0, 1)
 
 PROCESS(th_12, "Temp/Humid Sensor");
 AUTOSTART_PROCESSES(&th_12);
@@ -115,6 +115,7 @@ go_to_sleep(void *ptr)
 		/* sleep until we need to post */
 		dht_uninit();
 		rtimer_arch_sleep((next_post - clock_time() - 2) * (rtc_freq/CLOCK_CONF_SECOND));
+		maca_on();
 		/* adjust the clock */
 		clock_adjust_ticks(CRM->WU_COUNT/CLOCK_CONF_SECOND);
 		dht_init();
