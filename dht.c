@@ -196,10 +196,12 @@ PROCESS_THREAD(read_dht, ev, data)
 
 void dht_init(void)
 {
+	/* power on dht */
 	setdo(KBI1);
 	GPIO->FUNC_SEL.KBI1=3;
 	gpio_set(KBI1);
 
+	/* set data pin */
 	setdo(TMR1);
 	GPIO->FUNC_SEL.TMR1=3;
 	gpio_set(TMR1);
