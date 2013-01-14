@@ -202,6 +202,14 @@ set_sleep_ok(void *ptr)
 	sleep_ok = 1;
 }
 
+static struct ctimer ct_ledoff;
+void
+led_off(void *ptr)
+{
+	gpio_reset(KBI5);
+}
+
+
 static rpl_dag_t *dag;
 
 PROCESS_THREAD(th_12, ev, data)
@@ -227,6 +235,14 @@ PROCESS_THREAD(th_12, ev, data)
 
 	etimer_set(&et_do_dht, POST_INTERVAL);
 	ctimer_set(&ct_powerwake, ON_POWER_WAKE_TIME, set_sleep_ok, NULL);
+
+
+	/* turn on RED led on power up for 2 secs. then turn off */
+	GPIO->FUNC_SEL.KBI5 = 3;
+	GPIO->PAD_DIR_SET.KBI5 = 1;
+	gpio_set(KBI5);
+
+	ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
 
 	dag = NULL;
 
