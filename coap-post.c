@@ -31,8 +31,6 @@
 #include "net/uip-debug.h"
 
 #define REMOTE_PORT     UIP_HTONS(COAP_DEFAULT_PORT)
-//#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0x2002, 0x3239, 0x614b, 0, 0, 0, 0, 1)
-#define SERVER_NODE(ipaddr)   uip_ip6addr(ipaddr, 0xaaaa, 0x0000, 0x0000, 0, 0, 0, 0, 1)
 
 PROCESS(th_12, "Temp/Humid Sensor");
 AUTOSTART_PROCESSES(&th_12);
@@ -40,6 +38,7 @@ AUTOSTART_PROCESSES(&th_12);
 struct etimer et_do_dht;
 static dht_result_t dht_current;
 uip_ipaddr_t server_ipaddr;
+static rpl_dag_t *dag;
 
 char buf[64];
 
@@ -99,7 +98,6 @@ PROCESS_THREAD(do_post, ev, data)
 {
 	PROCESS_BEGIN();
 	static coap_packet_t request[1]; /* This way the packet can be treated as pointer as usual. */
-	SERVER_NODE(&server_ipaddr);
 	
 	coap_init_message(request, COAP_TYPE_CON, COAP_POST, 0 );
 	coap_set_header_uri_path(request, "/th12");
@@ -140,7 +138,10 @@ void do_result( dht_result_t d) {
 
 	create_dht_msg(&d, buf);
 
-	process_start(&do_post, NULL);
+	if (dag != NULL) {
+		process_start(&do_post, NULL);
+	}
+
 }
 
 static uint8_t led = 0;
@@ -172,10 +173,13 @@ PROCESS_THREAD(th_12, ev, data)
 
 	etimer_set(&et_do_dht, POST_INTERVAL);
 
+	dag = NULL;
+
 	while(1) {
 		PROCESS_WAIT_EVENT();
 
 		if(etimer_expired(&et_do_dht)) {
+
 			if(led == 1) {
 				led = 0;
 				gpio_reset(KBI5);
@@ -183,6 +187,25 @@ PROCESS_THREAD(th_12, ev, data)
 				led = 1;
 				gpio_set(KBI5);
 			}
+
+			if(dag == NULL) {
+				dag = rpl_get_any_dag();
+				if (dag != NULL) {
+					uip_ipaddr_t *addr;
+					addr = &(dag->prefix_info.prefix);
+					/* assume 64 bit prefix for now */
+					memcpy(&server_ipaddr, addr, sizeof(uip_ipaddr_t));
+					server_ipaddr.u16[3] = 0;
+					server_ipaddr.u16[4] = 0;
+					server_ipaddr.u16[5] = 0;
+					server_ipaddr.u16[6] = 0;
+					server_ipaddr.u16[7] = UIP_HTONS(1);
+					PRINTF("joined DAG. Posting to ");
+					PRINT6ADDR(&server_ipaddr);
+					PRINTF("\n\r");
+				}
+			}
+
 			etimer_set(&et_do_dht, POST_INTERVAL);
 			process_start(&read_dht, NULL);
 		}		
