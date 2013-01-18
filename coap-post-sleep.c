@@ -23,8 +23,8 @@
 #include "th-12.h"
 #include "dht.h"
 
-#define POST_INTERVAL (10 * CLOCK_SECOND)
-#define ON_POWER_WAKE_TIME (30 * CLOCK_SECOND)
+#define POST_INTERVAL (120 * CLOCK_SECOND)
+#define ON_POWER_WAKE_TIME (60 * CLOCK_SECOND)
 
 /* How long to wait before sleeping after starting the coap post */
 /* will also sleep if a response to the post is recieved */
@@ -113,9 +113,12 @@ go_to_sleep(void *ptr)
 		/* sleep until we need to post */
 		dht_uninit();
 		rtimer_arch_sleep((next_post - clock_time() - 2) * (rtc_freq/CLOCK_CONF_SECOND));
-		maca_on();
+
 		/* adjust the clock */
-		clock_adjust_ticks(CRM->WU_COUNT/CLOCK_CONF_SECOND);
+		/* currently this breaks everything after a few samples. not sure why. */
+		/* also doesn't seem to be very critical */
+//		clock_adjust_ticks((CRM->WU_COUNT*CLOCK_CONF_SECOND)/rtc_freq);
+//		printf("adj: %d\n\r", CRM->WU_COUNT);
 		dht_init();
 	}
 	process_exit(&do_post);
@@ -242,6 +245,11 @@ PROCESS_THREAD(th_12, ev, data)
 	GPIO->PAD_DIR_SET.KBI5 = 1;
 	gpio_set(KBI5);
 
+	/* use T2 as a debug pin */
+	GPIO->FUNC_SEL.TMR2 = 3;
+	GPIO->PAD_DIR_SET.TMR2 = 1;
+	gpio_set(TMR2);
+	
 	ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
 
 	dag = NULL;
@@ -275,6 +283,28 @@ PROCESS_THREAD(th_12, ev, data)
 			if(dag != NULL && post_ok == 1) {
 				/* lock doing more posts also until this finishes */
 				post_ok = 0;
+
+				if(sleep_ok) {
+					dht_init();
+					gpio_set(TMR2);
+					rtc_delay_ms(5);
+					gpio_reset(TMR2);
+					
+					CRM->WU_CNTLbits.EXT_OUT_POL = 0xf; /* drive KBI0-3 high during sleep */
+					rtimer_arch_sleep(2 * rtc_freq);
+					maca_on();
+					
+					gpio_set(TMR2);
+					rtc_delay_ms(5);
+					gpio_reset(TMR2);
+					
+					/* adjust the clock */
+					/* can't really explain why you shouldn't adjust ticks */
+					/* but you shouldn't... */
+//					clock_adjust_ticks((CRM->WU_COUNT*CLOCK_CONF_SECOND)/rtc_freq);
+//					printf("adj: %d\n\r", CRM->WU_COUNT);
+				}
+
 				process_start(&read_dht, NULL);
 			}
 		}		
