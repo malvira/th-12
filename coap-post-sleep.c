@@ -109,7 +109,7 @@ void
 go_to_sleep(void *ptr)
 {
 	PRINTF("go to sleep\n\r");
-	if(sleep_ok) {
+	if(sleep_ok == 1) {
 		/* sleep until we need to post */
 		dht_uninit();
 		rtimer_arch_sleep((next_post - clock_time() - 2) * (rtc_freq/CLOCK_CONF_SECOND));
@@ -202,6 +202,7 @@ void
 set_sleep_ok(void *ptr)
 {
 	PRINTF("Power ON wake timeout expired. Ok to sleep\n\r");
+	gpio_reset(GPIO_43);
 	sleep_ok = 1;
 }
 
@@ -245,10 +246,15 @@ PROCESS_THREAD(th_12, ev, data)
 	GPIO->PAD_DIR_SET.KBI5 = 1;
 	gpio_set(KBI5);
 
+	/* Turn on GREEN led we join a DAG. Turn off once we start sleeping */
+	GPIO->FUNC_SEL.GPIO_43 = 3;
+	GPIO->PAD_DIR_SET.GPIO_43 = 1;
+	gpio_reset(GPIO_43);
+
 	/* use T2 as a debug pin */
-	GPIO->FUNC_SEL.TMR2 = 3;
-	GPIO->PAD_DIR_SET.TMR2 = 1;
-	gpio_set(TMR2);
+	/* GPIO->FUNC_SEL.TMR2 = 3; */
+	/* GPIO->PAD_DIR_SET.TMR2 = 1; */
+	/* gpio_set(TMR2); */
 	
 	ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
 
@@ -256,47 +262,54 @@ PROCESS_THREAD(th_12, ev, data)
 
 	while(1) {
 
-		PROCESS_WAIT_EVENT();
+		if(dag == NULL) {
+			dag = rpl_get_any_dag();
+			if (dag != NULL) {
+				uip_ipaddr_t *addr;
+				gpio_set(GPIO_43);
+				addr = &(dag->prefix_info.prefix);
+				/* assume 64 bit prefix for now */
+				memcpy(&server_ipaddr, addr, sizeof(uip_ipaddr_t));
+				server_ipaddr.u16[3] = 0;
+				server_ipaddr.u16[4] = 0;
+				server_ipaddr.u16[5] = 0;
+				server_ipaddr.u16[6] = 0;
+				server_ipaddr.u16[7] = UIP_HTONS(1);
+				PRINTF("joined DAG. Posting to ");
+				PRINT6ADDR(&server_ipaddr);
+				PRINTF("\n\r");
+				/* queue up a post to get some instant satisfaction */
+				etimer_set(&et_do_dht, 1 * CLOCK_SECOND);
+			}
 
+			PROCESS_PAUSE();
+
+		} else {
+			PROCESS_WAIT_EVENT();
+		}
+			
 		if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
 			next_post = clock_time() + POST_INTERVAL;
 			etimer_set(&et_do_dht, POST_INTERVAL);
-
-			if(dag == NULL) {
-				dag = rpl_get_any_dag();
-				if (dag != NULL) {
-					uip_ipaddr_t *addr;
-					addr = &(dag->prefix_info.prefix);
-					/* assume 64 bit prefix for now */
-					memcpy(&server_ipaddr, addr, sizeof(uip_ipaddr_t));
-					server_ipaddr.u16[3] = 0;
-					server_ipaddr.u16[4] = 0;
-					server_ipaddr.u16[5] = 0;
-					server_ipaddr.u16[6] = 0;
-					server_ipaddr.u16[7] = UIP_HTONS(1);
-					PRINTF("joined DAG. Posting to ");
-					PRINT6ADDR(&server_ipaddr);
-					PRINTF("\n\r");
-				}
-			}
 
 			if(dag != NULL && post_ok == 1) {
 				/* lock doing more posts also until this finishes */
 				post_ok = 0;
 
-				if(sleep_ok) {
+				if(sleep_ok == 1) {
 					dht_init();
-					gpio_set(TMR2);
-					rtc_delay_ms(5);
-					gpio_reset(TMR2);
+
+					/* gpio_set(TMR2); */
+					/* rtc_delay_ms(5); */
+					/* gpio_reset(TMR2); */
 					
 					CRM->WU_CNTLbits.EXT_OUT_POL = 0xf; /* drive KBI0-3 high during sleep */
 					rtimer_arch_sleep(2 * rtc_freq);
 					maca_on();
 					
-					gpio_set(TMR2);
-					rtc_delay_ms(5);
-					gpio_reset(TMR2);
+					/* gpio_set(TMR2); */
+					/* rtc_delay_ms(5); */
+					/* gpio_reset(TMR2); */
 					
 					/* adjust the clock */
 					/* can't really explain why you shouldn't adjust ticks */
