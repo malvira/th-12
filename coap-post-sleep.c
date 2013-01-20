@@ -24,7 +24,7 @@
 #include "dht.h"
 
 #define POST_INTERVAL (120 * CLOCK_SECOND)
-#define ON_POWER_WAKE_TIME (60 * CLOCK_SECOND)
+#define ON_POWER_WAKE_TIME (30 * CLOCK_SECOND)
 
 /* How long to wait before sleeping after starting the coap post */
 /* will also sleep if a response to the post is recieved */
@@ -45,14 +45,10 @@ static dht_result_t dht_current;
 uip_ipaddr_t server_ipaddr;
 
 /* value of sleep_ok determines if it is ok to sleep */
-static uint8_t sleep_ok = 0;
+static uint32_t sleep_ok = 0;
 
 /* lock posting while they happen --- coap can take 62 secs to timeout and we don't want to queue many posts at a time */
 static uint8_t post_ok = 1;
-
-/* post_timed_out is cleared by the post callback routine. */
-/* the callback routine isn't called if it never gets a response */
-static uint8_t post_timed_out = 1;
 
 /* time the next post is scheduled for: used to calculate how long to sleep */
 static clock_time_t next_post;
@@ -60,7 +56,7 @@ static clock_time_t next_post;
 /* used to go to sleep */
 static struct ctimer ct_sleep;
 
-char buf[64];
+char buf[256];
 
 uint16_t create_dht_msg(dht_result_t *d, char *buf)
 {
@@ -108,11 +104,18 @@ PROCESS_NAME(do_post);
 void
 go_to_sleep(void *ptr)
 {
-	PRINTF("go to sleep\n\r");
+
+	PRINTF("before sleep\n\r");
+	PRINTF("next post: %d\n\r", next_post);
+	PRINTF("clock time: %d\n\r", clock_time());
+	rtc_delay_ms(100);
+
 	if(sleep_ok == 1) {
+		PRINTF("go to sleep\n\r");
 		/* sleep until we need to post */
 		dht_uninit();
-		rtimer_arch_sleep((next_post - clock_time() - 2) * (rtc_freq/CLOCK_CONF_SECOND));
+		
+		rtimer_arch_sleep((next_post - clock_time() - 5) * (rtc_freq/CLOCK_CONF_SECOND));
 
 		/* adjust the clock */
 		/* currently this breaks everything after a few samples. not sure why. */
@@ -120,9 +123,22 @@ go_to_sleep(void *ptr)
 //		clock_adjust_ticks((CRM->WU_COUNT*CLOCK_CONF_SECOND)/rtc_freq);
 //		printf("adj: %d\n\r", CRM->WU_COUNT);
 		dht_init();
+	} else {
+		PRINTF("can't sleep now, sleep not ok\n\r");
 	}
+
 	process_exit(&do_post);
 	post_ok = 1;
+
+	PRINTF("after sleep\n\r");
+	PRINTF("next post: %d\n\r", next_post);
+	PRINTF("clock time: %d\n\r", clock_time());
+	if(etimer_expired(&et_do_dht)) {
+		PRINTF("do dht IS expired\n\r");
+	} else {
+		PRINTF("do dht NOT expired\n\r");
+	}
+
 }
 
 /* This function is will be passed to COAP_BLOCKING_REQUEST() to handle responses. */
@@ -202,6 +218,7 @@ void
 set_sleep_ok(void *ptr)
 {
 	PRINTF("Power ON wake timeout expired. Ok to sleep\n\r");
+	/* XXX Todo: test doing a go_to_sleep here */
 	gpio_reset(GPIO_43);
 	sleep_ok = 1;
 }
@@ -232,14 +249,22 @@ PROCESS_THREAD(th_12, ev, data)
 #ifdef RPL_LEAF_ONLY
 	PRINTF("RPL LEAF ONLY\n\r");
 #endif
-	
+
+	/* use T2 as a debug pin */
+	GPIO->FUNC_SEL.TMR2 = 3;
+	GPIO->PAD_DIR_SET.TMR2 = 1;
+	gpio_set(TMR2);
+
+//	dht_uninit();
+//	rtimer_arch_sleep(10 * rtc_freq);
+//	maca_on();
+
 	dht_init();
 	adc_setup_chan(5);
 	adc_setup_chan(6);
 
 	etimer_set(&et_do_dht, POST_INTERVAL);
 	ctimer_set(&ct_powerwake, ON_POWER_WAKE_TIME, set_sleep_ok, NULL);
-
 
 	/* turn on RED led on power up for 2 secs. then turn off */
 	GPIO->FUNC_SEL.KBI5 = 3;
@@ -250,11 +275,6 @@ PROCESS_THREAD(th_12, ev, data)
 	GPIO->FUNC_SEL.GPIO_43 = 3;
 	GPIO->PAD_DIR_SET.GPIO_43 = 1;
 	gpio_reset(GPIO_43);
-
-	/* use T2 as a debug pin */
-	/* GPIO->FUNC_SEL.TMR2 = 3; */
-	/* GPIO->PAD_DIR_SET.TMR2 = 1; */
-	/* gpio_set(TMR2); */
 	
 	ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
 
@@ -287,13 +307,17 @@ PROCESS_THREAD(th_12, ev, data)
 		} else {
 			PROCESS_WAIT_EVENT();
 		}
+
+		PRINTF(".");
 			
 		if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
+			PRINTF("post schedule\n\r");
+			PRINTF("post ok: %d\n\r", post_ok);
 			next_post = clock_time() + POST_INTERVAL;
 			etimer_set(&et_do_dht, POST_INTERVAL);
 
 			if(dag != NULL && post_ok == 1) {
-				/* lock doing more posts also until this finishes */
+				/* lock doing more posts until this finishes */
 				post_ok = 0;
 
 				if(sleep_ok == 1) {
