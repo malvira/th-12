@@ -23,8 +23,18 @@
 #include "th-12.h"
 #include "dht.h"
 
+/* how long to wait between posts */
 #define POST_INTERVAL (120 * CLOCK_SECOND)
+
+/* stay awake for this long on power up */
 #define ON_POWER_WAKE_TIME (30 * CLOCK_SECOND)
+
+/* try to reread the sensor this many times if it reports a bad checksum before giving up */
+#define SENSOR_RETRIES (3)
+static uint8_t sensor_tries; 
+
+/* how far in the future to schedule the retry. Should be short */
+#define RETRY_INTERVAL (0.04 * CLOCK_SECOND)
 
 /* How long to wait before sleeping after starting the coap post */
 /* will also sleep if a response to the post is recieved */
@@ -102,11 +112,6 @@ void
 go_to_sleep(void *ptr)
 {
 
-	PRINTF("before sleep\n\r");
-	PRINTF("next post: %d\n\r", next_post);
-	PRINTF("clock time: %d\n\r", clock_time());
-	rtc_delay_ms(100);
-
 	if(sleep_ok == 1) {
 		PRINTF("go to sleep\n\r");
 		/* sleep until we need to post */
@@ -114,26 +119,12 @@ go_to_sleep(void *ptr)
 		
 		rtimer_arch_sleep((next_post - clock_time() - 5) * (rtc_freq/CLOCK_CONF_SECOND));
 
-		/* adjust the clock */
-		/* currently this breaks everything after a few samples. not sure why. */
-		/* also doesn't seem to be very critical */
-//		clock_adjust_ticks((CRM->WU_COUNT*CLOCK_CONF_SECOND)/rtc_freq);
-//		printf("adj: %d\n\r", CRM->WU_COUNT);
 		dht_init();
 	} else {
 		PRINTF("can't sleep now, sleep not ok\n\r");
 	}
 
 	process_exit(&do_post);
-
-	PRINTF("after sleep\n\r");
-	PRINTF("next post: %d\n\r", next_post);
-	PRINTF("clock time: %d\n\r", clock_time());
-	if(etimer_expired(&et_do_dht)) {
-		PRINTF("do dht IS expired\n\r");
-	} else {
-		PRINTF("do dht NOT expired\n\r");
-	}
 
 }
 
@@ -182,6 +173,8 @@ void do_result( dht_result_t d) {
 	uint16_t frac_t, int_t;
 	char neg = ' ';
 
+	sensor_tries++;
+
 	if (d.ok == 1) {
 
 		adc_service();
@@ -211,8 +204,15 @@ void do_result( dht_result_t d) {
 		process_start(&do_post, NULL);
 
 	} else {
-		ANNOTATE("bad checksum\n\r");
-		go_to_sleep(NULL);
+		PRINTF("bad checksum\n\r");
+		if(sensor_tries < SENSOR_RETRIES) {
+			PRINTF("retry sensor\n\r");
+			next_post = clock_time() + RETRY_INTERVAL;
+			etimer_set(&et_do_dht, RETRY_INTERVAL);
+		} else {
+			PRINTF("too many sensor retries, giving up.\n\r");
+			go_to_sleep(NULL);
+		}
 	}
 
 }
@@ -222,9 +222,9 @@ void
 set_sleep_ok(void *ptr)
 {
 	PRINTF("Power ON wake timeout expired. Ok to sleep\n\r");
-	/* XXX Todo: test doing a go_to_sleep here */
 	gpio_reset(GPIO_43);
 	sleep_ok = 1;
+	go_to_sleep(NULL);
 }
 
 static struct ctimer ct_ledoff;
@@ -258,10 +258,6 @@ PROCESS_THREAD(th_12, ev, data)
 	GPIO->FUNC_SEL.TMR2 = 3;
 	GPIO->PAD_DIR_SET.TMR2 = 1;
 	gpio_set(TMR2);
-
-//	dht_uninit();
-//	rtimer_arch_sleep(10 * rtc_freq);
-//	maca_on();
 
 	dht_init();
 	adc_setup_chan(5);
@@ -311,8 +307,6 @@ PROCESS_THREAD(th_12, ev, data)
 		} else {
 			PROCESS_WAIT_EVENT();
 		}
-
-		PRINTF(".");
 			
 		if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
 			PRINTF("post schedule\n\r");
@@ -323,29 +317,17 @@ PROCESS_THREAD(th_12, ev, data)
 
 				if(sleep_ok == 1) {
 					dht_init();
-
-					/* gpio_set(TMR2); */
-					/* rtc_delay_ms(5); */
-					/* gpio_reset(TMR2); */
 					
 					CRM->WU_CNTLbits.EXT_OUT_POL = 0xf; /* drive KBI0-3 high during sleep */
 					rtimer_arch_sleep(2 * rtc_freq);
 					maca_on();
 					
-					/* gpio_set(TMR2); */
-					/* rtc_delay_ms(5); */
-					/* gpio_reset(TMR2); */
-					
-					/* adjust the clock */
-					/* can't really explain why you shouldn't adjust ticks */
-					/* but you shouldn't... */
-//					clock_adjust_ticks((CRM->WU_COUNT*CLOCK_CONF_SECOND)/rtc_freq);
-//					printf("adj: %d\n\r", CRM->WU_COUNT);
 				}
-
+				
+				sensor_tries = 0;
 				process_start(&read_dht, NULL);
 			}
-		}		
+		}
 
 	} 
 
