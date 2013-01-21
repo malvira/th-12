@@ -40,7 +40,7 @@ static dht_result_t dht_current;
 uip_ipaddr_t server_ipaddr;
 static rpl_dag_t *dag;
 
-char buf[64];
+char buf[256];
 
 uint16_t create_dht_msg(dht_result_t *d, char *buf)
 {
