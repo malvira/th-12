@@ -16,7 +16,7 @@
 
 /* debug */
 /* commented out since it can conflict with the debug setting in th-12.c */
-#define DEBUG DEBUG_NONE
+#define DEBUG DEBUG_FULL
 #include "net/uip-debug.h" 
 
 #define setdo(x) GPIO->PAD_DIR_SET.x=1
@@ -194,6 +194,9 @@ PROCESS_THREAD(read_dht, ev, data)
 		  }
 		  d.t = temp;
 		  dht_result(d);
+		} else {
+			d.ok = 0;
+			dht_result(d);
 		}
 
 		PROCESS_EXIT();

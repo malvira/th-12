@@ -47,9 +47,6 @@ uip_ipaddr_t server_ipaddr;
 /* value of sleep_ok determines if it is ok to sleep */
 static uint32_t sleep_ok = 0;
 
-/* lock posting while they happen --- coap can take 62 secs to timeout and we don't want to queue many posts at a time */
-static uint8_t post_ok = 1;
-
 /* time the next post is scheduled for: used to calculate how long to sleep */
 static clock_time_t next_post;
 
@@ -128,7 +125,6 @@ go_to_sleep(void *ptr)
 	}
 
 	process_exit(&do_post);
-	post_ok = 1;
 
 	PRINTF("after sleep\n\r");
 	PRINTF("next post: %d\n\r", next_post);
@@ -186,31 +182,39 @@ void do_result( dht_result_t d) {
 	uint16_t frac_t, int_t;
 	char neg = ' ';
 
-	adc_service();
+	if (d.ok == 1) {
 
-	dht_current.t = d.t;
-	dht_current.rh = d.rh;
-
+		adc_service();
+		
+		dht_current.t = d.t;
+		dht_current.rh = d.rh;
+		
 #if DEBUG_ANNOTATE || DEBUG_FULL
-	if(d.t < 0) {
-	  neg = '-';
-	  int_t = (-1 * d.t)/10;
-	  frac_t = (-1 * d.t) % 10;
-	} else {
-	  neg = ' ';
-	  int_t = d.t/10;
-	  frac_t = d.t % 10;
-	}
+		if(d.t < 0) {
+			neg = '-';
+			int_t = (-1 * d.t)/10;
+			frac_t = (-1 * d.t) % 10;
+		} else {
+			neg = ' ';
+			int_t = d.t/10;
+			frac_t = d.t % 10;
+		}
 #endif
+		
+		ANNOTATE("temp: %c%d.%dC humid: %d.%d%%, ", neg, int_t, frac_t, d.rh / 10, d.rh % 10);
+		ANNOTATE("vbatt: %dmV ", adc_vbatt);
+		ANNOTATE("a5: %4dmV, a6: %4dmV ", adc_voltage(5), adc_voltage(6));
+		ANNOTATE("\n\r");
+		
+		create_dht_msg(&d, buf);
+		
+		process_start(&do_post, NULL);
 
-	ANNOTATE("temp: %c%d.%dC humid: %d.%d%%, ", neg, int_t, frac_t, d.rh / 10, d.rh % 10);
-	ANNOTATE("vbatt: %dmV ", adc_vbatt);
-	ANNOTATE("a5: %4dmV, a6: %4dmV ", adc_voltage(5), adc_voltage(6));
-	ANNOTATE("\n\r");
+	} else {
+		ANNOTATE("bad checksum\n\r");
+		go_to_sleep(NULL);
+	}
 
-	create_dht_msg(&d, buf);
-
-	process_start(&do_post, NULL);
 }
 
 static struct ctimer ct_powerwake;
@@ -312,13 +316,10 @@ PROCESS_THREAD(th_12, ev, data)
 			
 		if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
 			PRINTF("post schedule\n\r");
-			PRINTF("post ok: %d\n\r", post_ok);
 			next_post = clock_time() + POST_INTERVAL;
 			etimer_set(&et_do_dht, POST_INTERVAL);
 
-			if(dag != NULL && post_ok == 1) {
-				/* lock doing more posts until this finishes */
-				post_ok = 0;
+			if(dag != NULL) {
 
 				if(sleep_ok == 1) {
 					dht_init();
