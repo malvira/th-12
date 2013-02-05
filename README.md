@@ -30,3 +30,11 @@ will sleep for NO_DAG_SLEEP_TIME (default 300 seconds), and then stay
 on for LOOKING_FOR_DAG_SLEEP_TIME (default 10 seconds) while it
 retries to find a RPL network. If it has joined a DAG, then the node
 sleeps for POST_INTERVAL, then posts the data and repeates.
+
+License
+=======
+
+This source code is released under the [same
+license](https://github.com/contiki-os/contiki/blob/master/LICENSE)
+that [Contiki OS](https://github.com/contiki-os/contiki) is released
+as.
