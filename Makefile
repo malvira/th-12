@@ -13,7 +13,7 @@ ifndef TARGET
 TARGET=th12
 endif
 
-CONTIKI=../tests/contiki
+CONTIKI=./contiki
 
 APPS += er-coap-07 erbium
 APPDIRS += ${addprefix apps/, $(APPS)}

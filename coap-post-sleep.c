@@ -54,6 +54,12 @@ struct etimer et_do_dht, et_poweron_timeout;
 static dht_result_t dht_current;
 uip_ipaddr_t server_ipaddr;
 
+/* this is the corrected battery voltage */
+/* the TH12 has a boost converter and so adc_vbatt cannot be used */
+/* the battery voltage goes though a 4.22M and 750K ohm voltage divider (vbatt = adc0 / 0.84883) */
+/* to adc0 */
+static uint16_t vbatt; 
+
 /* value of sleep_ok determines if it is ok to sleep */
 static uint32_t sleep_ok = 0;
 
@@ -99,7 +105,7 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 		     frac_t,
 		     d->rh / 10,
 		     d->rh % 10,
-		     adc_vbatt
+		     vbatt
 		);
 	buf[n] = 0;
 	PRINTF("buf: %s\n", buf);
@@ -195,8 +201,9 @@ void do_result( dht_result_t d) {
 #endif
 		
 		ANNOTATE("temp: %c%d.%dC humid: %d.%d%%, ", neg, int_t, frac_t, d.rh / 10, d.rh % 10);
-		ANNOTATE("vbatt: %dmV ", adc_vbatt);
-		ANNOTATE("a5: %4dmV, a6: %4dmV ", adc_voltage(5), adc_voltage(6));
+		ANNOTATE("a0: %4dmV, a5: %4dmV, a6: %4dmV ", adc_voltage(0), adc_voltage(5), adc_voltage(6));
+		vbatt = (uint16_t)(((uint32_t)adc_voltage(0) * 10000) / 8488);
+		ANNOTATE("vbatt: %dmV ", vbatt);
 		ANNOTATE("\n\r");
 		
 		create_dht_msg(&d, buf);
@@ -254,14 +261,21 @@ PROCESS_THREAD(th_12, ev, data)
 	PRINTF("RPL LEAF ONLY\n\r");
 #endif
 
+	/* boost enable pin */
+	GPIO->FUNC_SEL.KBI2 = 3;
+	GPIO->PAD_DIR_SET.KBI2 = 1;
+	gpio_set(KBI2);
+
 	/* use T2 as a debug pin */
 	GPIO->FUNC_SEL.TMR2 = 3;
 	GPIO->PAD_DIR_SET.TMR2 = 1;
 	gpio_set(TMR2);
 
 	dht_init();
+	adc_setup_chan(0); /* battery voltage through divider */
 	adc_setup_chan(5);
 	adc_setup_chan(6);
+	adc_service();
 
 	etimer_set(&et_do_dht, POST_INTERVAL);
 	ctimer_set(&ct_powerwake, ON_POWER_WAKE_TIME, set_sleep_ok, NULL);
