@@ -24,7 +24,7 @@
 #include "dht.h"
 
 /* how long to wait between posts */
-#define POST_INTERVAL (120 * CLOCK_SECOND)
+#define POST_INTERVAL (30 * CLOCK_SECOND)
 
 /* stay awake for this long on power up */
 #define ON_POWER_WAKE_TIME (30 * CLOCK_SECOND)
@@ -123,6 +123,11 @@ go_to_sleep(void *ptr)
 		/* sleep until we need to post */
 		dht_uninit();
 		
+		if(vbatt < 2500) {
+                  /* drive KBI2 high during sleep */
+		  /* to keep the boost on */
+		  CRM->WU_CNTLbits.EXT_OUT_POL = (1 << 2); 
+		} 
 		rtimer_arch_sleep((next_post - clock_time() - 5) * (rtc_freq/CLOCK_CONF_SECOND));
 
 		dht_init();
