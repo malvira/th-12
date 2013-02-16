@@ -24,7 +24,7 @@
 #include "dht.h"
 
 /* how long to wait between posts */
-#define POST_INTERVAL (30 * CLOCK_SECOND)
+#define POST_INTERVAL (120 * CLOCK_SECOND)
 
 /* stay awake for this long on power up */
 #define ON_POWER_WAKE_TIME (30 * CLOCK_SECOND)
@@ -56,7 +56,7 @@ uip_ipaddr_t server_ipaddr;
 
 /* this is the corrected battery voltage */
 /* the TH12 has a boost converter and so adc_vbatt cannot be used */
-/* the battery voltage goes though a 4.22M and 750K ohm voltage divider (vbatt = adc0 / 0.84883) */
+/* the battery voltage goes though a 0.5 voltage divider */
 /* to adc0 */
 static uint16_t vbatt; 
 
@@ -123,11 +123,16 @@ go_to_sleep(void *ptr)
 		/* sleep until we need to post */
 		dht_uninit();
 		
-		if(vbatt < 2500) {
+		if(vbatt < 2700) {
                   /* drive KBI2 high during sleep */
 		  /* to keep the boost on */
-		  CRM->WU_CNTLbits.EXT_OUT_POL = (1 << 2); 
-		} 
+		  CRM->WU_CNTLbits.EXT_OUT_POL |= (1 << 2); 
+		  gpio_set(KBI1);
+		} else {
+		  CRM->WU_CNTLbits.EXT_OUT_POL &= ~(1 << 2); 
+		  gpio_reset(KBI1);
+		}
+
 		rtimer_arch_sleep((next_post - clock_time() - 5) * (rtc_freq/CLOCK_CONF_SECOND));
 
 		dht_init();
@@ -207,7 +212,7 @@ void do_result( dht_result_t d) {
 		
 		ANNOTATE("temp: %c%d.%dC humid: %d.%d%%, ", neg, int_t, frac_t, d.rh / 10, d.rh % 10);
 		ANNOTATE("a0: %4dmV, a5: %4dmV, a6: %4dmV ", adc_voltage(0), adc_voltage(5), adc_voltage(6));
-		vbatt = (uint16_t)(((uint32_t)adc_voltage(0) * 10000) / 8488);
+		vbatt = adc_voltage(0) * 2;
 		ANNOTATE("vbatt: %dmV ", vbatt);
 		ANNOTATE("\n\r");
 		
