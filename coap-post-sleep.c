@@ -27,7 +27,7 @@
 #define POST_INTERVAL (120 * CLOCK_SECOND)
 
 /* stay awake for this long on power up */
-#define ON_POWER_WAKE_TIME (30 * CLOCK_SECOND)
+#define ON_POWER_WAKE_TIME (120 * CLOCK_SECOND)
 
 /* try to reread the sensor this many times if it reports a bad checksum before giving up */
 #define SENSOR_RETRIES (3)
