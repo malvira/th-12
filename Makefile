@@ -2,9 +2,6 @@ all:
 	make TARGET=th12 coap-post
 	make TARGET=th12-lowpower coap-post-sleep
 
-coap-post-sleep: TARGET=th12-lowpower 
-coap-post-sleep: DEFINES += PROJECT_CONF_H=\"lowpower-conf.h\"
-
 clean:
 	make TARGET=th12 clean
 	make TARGET=th12-lowpower clean
