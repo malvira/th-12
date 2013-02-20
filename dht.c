@@ -16,7 +16,7 @@
 
 /* debug */
 /* commented out since it can conflict with the debug setting in th-12.c */
-#define DEBUG DEBUG_FULL
+#define DEBUG DEBUG_NONE
 #include "net/uip-debug.h" 
 
 #define setdo(x) GPIO->PAD_DIR_SET.x=1
