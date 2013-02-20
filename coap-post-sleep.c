@@ -105,7 +105,7 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 		     frac_t,
 		     d->rh / 10,
 		     d->rh % 10,
-		     vbatt
+		     adc_vbatt
 		);
 	buf[n] = 0;
 	PRINTF("buf: %s\n", buf);
@@ -123,7 +123,7 @@ go_to_sleep(void *ptr)
 		/* sleep until we need to post */
 		dht_uninit();
 		
-		if(vbatt < 2700) {
+		if(adc_vbatt < 2700) {
                   /* drive KBI2 high during sleep */
 		  /* to keep the boost on */
 		  CRM->WU_CNTLbits.EXT_OUT_POL |= (1 << 2); 
@@ -212,8 +212,7 @@ void do_result( dht_result_t d) {
 		
 		ANNOTATE("temp: %c%d.%dC humid: %d.%d%%, ", neg, int_t, frac_t, d.rh / 10, d.rh % 10);
 		ANNOTATE("a0: %4dmV, a5: %4dmV, a6: %4dmV ", adc_voltage(0), adc_voltage(5), adc_voltage(6));
-		vbatt = adc_voltage(0) * 2;
-		ANNOTATE("vbatt: %dmV ", vbatt);
+		ANNOTATE("vbatt: %dmV ", adc_vbatt);
 		ANNOTATE("\n\r");
 		
 		create_dht_msg(&d, buf);
