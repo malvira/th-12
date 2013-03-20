@@ -161,7 +161,9 @@ go_to_sleep(void *ptr)
 		  gpio_reset(KBI1);
 		}
 
-		rtimer_arch_sleep((next_post - clock_time() - 5) * (rtc_freq/CLOCK_CONF_SECOND));
+		if (next_post > (clock_time() + 5)) {
+		  rtimer_arch_sleep((next_post - clock_time() - 5) * (rtc_freq/CLOCK_CONF_SECOND));
+		}
 
 		dht_init();
 	} else {
@@ -364,11 +366,8 @@ PROCESS_THREAD(th_12, ev, data)
 				  PRINTF("resolv_event_found\n");
 				  resolv_lookup(sink_name, &sink_addr);
 				  PRINT6ADDR(sink_addr);
-				  PRINTF("\n");	    
+				  PRINTF("\n\r");	    
 				}				
-
-				PRINT6ADDR(sink_addr);
-				PRINTF("\n\r");
 				/* queue up a post to get some instant satisfaction */
 				etimer_set(&et_do_dht, 1 * CLOCK_SECOND);
 			}
