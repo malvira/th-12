@@ -50,6 +50,8 @@
 
 #include <stdint.h>
 
+#define RESOLV_CONF_SUPPORTS_MDNS 0
+
 /* mc1322x files */
 #include "contiki-mc1322x-conf.h"
 

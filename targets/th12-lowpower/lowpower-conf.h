@@ -2,5 +2,6 @@
 #define LOWPOWER_CONF_H
 
 #define RPL_CONF_LEAF_ONLY 1
+#define RESOLV_CONF_SUPPORTS_MDNS 0
 
 #endif

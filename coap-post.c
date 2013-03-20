@@ -87,7 +87,7 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 void
 client_chunk_handler(void *response)
 {
-  uint8_t *chunk;
+  const uint8_t *chunk;
 
   int len = coap_get_payload(response, &chunk);
   printf("|%.*s", len, (char *)chunk);

@@ -2,10 +2,6 @@ all:
 	make TARGET=th12 coap-post
 	make TARGET=th12-lowpower coap-post-sleep
 
-clean:
-	make TARGET=th12 clean
-	make TARGET=th12-lowpower clean
-
 ifndef TARGET
 TARGET=th12
 endif
@@ -33,3 +29,9 @@ PROJECT_SOURCEFILES += rplinfo.c
 
 include $(CONTIKI)/Makefile.include
 
+clean:
+	rm -f *~ *core core *.srec \
+	*.lst *.map \
+	*.cprg *.bin *.data contiki*.a *.firmware core-labels.S *.ihex *.ini \
+	*.ce *.co $(CLEAN)
+	-rm -rf obj_th12 obj_th12-lowpower

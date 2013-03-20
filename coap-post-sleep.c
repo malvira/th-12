@@ -29,6 +29,21 @@
 /* stay awake for this long on power up */
 #define ON_POWER_WAKE_TIME (120 * CLOCK_SECOND)
 
+/* perform a sink check this number of wake cycles */
+/* 0 will always do a sink check */
+/* a post sink will automatically checked and initialized on boot */
+/* or when the sink URL has changed */
+#define WAKE_CYCLES_PER_SINK_CHECK 10
+
+/* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
+#define SINK_CHECK_TRIES 3
+
+/* only report the battery voltage after */
+/* the th12 has been running for BATTERY_DELAY */
+/* the battery voltage input has a very slow time constant and on power up takes a while to reach */
+/* the final voltage */
+#define BATTERY_DELAY (100 * CLOCK_SECOND)
+
 /* try to reread the sensor this many times if it reports a bad checksum before giving up */
 #define SENSOR_RETRIES (3)
 static uint8_t sensor_tries; 
@@ -48,11 +63,12 @@ static uint8_t sensor_tries;
 #define REMOTE_PORT     UIP_HTONS(COAP_DEFAULT_PORT)
 
 PROCESS(th_12, "Temp/Humid Sensor");
-AUTOSTART_PROCESSES(&th_12);
+AUTOSTART_PROCESSES(&th_12, &resolv_process);
 
 struct etimer et_do_dht, et_poweron_timeout;
 static dht_result_t dht_current;
 uip_ipaddr_t server_ipaddr;
+static uip_ipaddr_t *sink_addr;
 
 /* this is the corrected battery voltage */
 /* the TH12 has a boost converter and so adc_vbatt cannot be used */
@@ -62,6 +78,10 @@ static uint16_t vbatt;
 
 /* value of sleep_ok determines if it is ok to sleep */
 static uint32_t sleep_ok = 0;
+
+/* flag to say if it's ok to report battery voltage */
+static uint8_t report_batt = 0;
+static struct ctimer ct_report_batt;
 
 /* time the next post is scheduled for: used to calculate how long to sleep */
 static clock_time_t next_post;
@@ -91,7 +111,8 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 	  frac_t = d->t % 10;
 	}
 
-	n += sprintf(&(buf[n]),"{\"eui\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"t\":\"%c%d.%dC\",\"h\":\"%d.%d%%\",\"vb\":\"%dmV\"}",
+        /* {"eui":"ec473c4d12bdd1ce","t":" 22.1C","h":"18.3%","vb":"2678mV"} */
+	n += sprintf(&(buf[n]),"{\"eui\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"t\":\"%c%d.%dC\",\"h\":\"%d.%d%%\"",
 		     addr->u8[0],
 		     addr->u8[1],
 		     addr->u8[2],
@@ -107,6 +128,13 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 		     d->rh % 10,
 		     vbatt
 		);
+	
+	if (report_batt == 1) {
+	  n += sprintf(&buf[n], ",\"vb\":\"%dmV\"}", vbatt);
+	} else {
+	  n += sprintf(&buf[n], "}");
+	}
+
 	buf[n] = 0;
 	PRINTF("buf: %s\n", buf);
 	return n;
@@ -148,7 +176,7 @@ go_to_sleep(void *ptr)
 void
 client_chunk_handler(void *response)
 {
-  uint8_t *chunk;
+  const uint8_t *chunk;
 
 	ctimer_stop(&ct_sleep);
   int len = coap_get_payload(response, &chunk);
@@ -179,7 +207,7 @@ PROCESS_THREAD(do_post, ev, data)
 
 	ctimer_set(&ct_sleep, SLEEP_AFTER_POST, go_to_sleep, NULL);
 
-	COAP_BLOCKING_REQUEST(&server_ipaddr, REMOTE_PORT, request, client_chunk_handler);
+	COAP_BLOCKING_REQUEST(sink_addr, REMOTE_PORT, request, client_chunk_handler);
 	PRINTF("status %u: %s\n", coap_error_code, coap_error_message);
 	
 	PROCESS_END();
@@ -235,13 +263,19 @@ void do_result( dht_result_t d) {
 }
 
 static struct ctimer ct_powerwake;
-void
+static void
 set_sleep_ok(void *ptr)
 {
 	PRINTF("Power ON wake timeout expired. Ok to sleep\n\r");
 	gpio_reset(GPIO_43);
 	sleep_ok = 1;
 	go_to_sleep(NULL);
+}
+
+static void
+set_report_batt_ok(void *ptr)
+{
+	report_batt = 1;
 }
 
 static struct ctimer ct_ledoff;
@@ -251,11 +285,13 @@ led_off(void *ptr)
 	gpio_reset(KBI5);
 }
 
-
 static rpl_dag_t *dag;
+static char sink_name[40] = "coap.lowpan.com";
 
 PROCESS_THREAD(th_12, ev, data)
 {
+  static uint8_t sink_ok = 0;
+
 	PROCESS_BEGIN();
 
 	/* Initialize the REST engine. */
@@ -285,10 +321,10 @@ PROCESS_THREAD(th_12, ev, data)
 	adc_setup_chan(0); /* battery voltage through divider */
 	adc_setup_chan(5);
 	adc_setup_chan(6);
-	adc_service();
 
 	etimer_set(&et_do_dht, POST_INTERVAL);
 	ctimer_set(&ct_powerwake, ON_POWER_WAKE_TIME, set_sleep_ok, NULL);
+	ctimer_set(&ct_report_batt, BATTERY_DELAY, set_report_batt_ok, NULL);
 
 	/* turn on RED led on power up for 2 secs. then turn off */
 	GPIO->FUNC_SEL.KBI5 = 3;
@@ -301,8 +337,6 @@ PROCESS_THREAD(th_12, ev, data)
 	gpio_reset(GPIO_43);
 	
 	ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
-
-	dag = NULL;
 
 	while(1) {
 
@@ -319,8 +353,21 @@ PROCESS_THREAD(th_12, ev, data)
 				server_ipaddr.u16[5] = 0;
 				server_ipaddr.u16[6] = 0;
 				server_ipaddr.u16[7] = UIP_HTONS(1);
-				PRINTF("joined DAG. Posting to ");
-				PRINT6ADDR(&server_ipaddr);
+				PRINTF("joined DAG.\n");
+
+				PRINTF("Trying to resolv %s\n", sink_name);
+				resolv_query(sink_name);
+				
+				PROCESS_WAIT_EVENT();
+				
+				if(ev == resolv_event_found) {
+				  PRINTF("resolv_event_found\n");
+				  resolv_lookup(sink_name, &sink_addr);
+				  PRINT6ADDR(sink_addr);
+				  PRINTF("\n");	    
+				}				
+
+				PRINT6ADDR(sink_addr);
 				PRINTF("\n\r");
 				/* queue up a post to get some instant satisfaction */
 				etimer_set(&et_do_dht, 1 * CLOCK_SECOND);
@@ -333,27 +380,24 @@ PROCESS_THREAD(th_12, ev, data)
 		}
 			
 		if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
-			PRINTF("post schedule\n\r");
-			next_post = clock_time() + POST_INTERVAL;
-			etimer_set(&et_do_dht, POST_INTERVAL);
-
-			if(dag != NULL) {
-
-				if(sleep_ok == 1) {
-					dht_init();
-					
-					CRM->WU_CNTLbits.EXT_OUT_POL = 0xf; /* drive KBI0-3 high during sleep */
-					rtimer_arch_sleep(2 * rtc_freq);
-					maca_on();
-					
-				}
-				
-				sensor_tries = 0;
-				process_start(&read_dht, NULL);
-			}
+		  PRINTF("post schedule\n\r");
+		  next_post = clock_time() + POST_INTERVAL;
+		  etimer_set(&et_do_dht, POST_INTERVAL);
+		  
+		  if(sleep_ok == 1) {
+		    dht_init();
+		    
+		    CRM->WU_CNTLbits.EXT_OUT_POL = 0xf; /* drive KBI0-3 high during sleep */
+		    rtimer_arch_sleep(2 * rtc_freq);
+		    maca_on();
+		    
+		  }
+		  
+		  sensor_tries = 0;
+		  process_start(&read_dht, NULL);
 		}
-
+		
 	} 
-
+	
 	PROCESS_END();
 }
