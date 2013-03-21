@@ -24,7 +24,7 @@
 #include "dht.h"
 
 /* how long to wait between posts */
-#define POST_INTERVAL (120 * CLOCK_SECOND)
+#define POST_INTERVAL (30 * CLOCK_SECOND)
 
 /* stay awake for this long on power up */
 //#define ON_POWER_WAKE_TIME (120 * CLOCK_SECOND)
@@ -40,10 +40,10 @@ static char sink_name[40] = "coap.lowpan.com";
 /* a sink check is a CON post instead of a NON */
 /* the check is ok if the node gets a confirmation */
 /* a bad resolve will also set sink_ok to 0 */
-#define WAKE_CYCLES_PER_SINK_CHECK 10
+#define WAKE_CYCLES_PER_SINK_CHECK 3
 
 /* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
-#define SINK_CHECK_TRIES 3
+#define SINK_CHECK_TRIES 2
 
 /* only report the battery voltage after */
 /* the th12 has been running for BATTERY_DELAY */
@@ -56,7 +56,7 @@ static char sink_name[40] = "coap.lowpan.com";
 static uint8_t sensor_tries; 
 
 /* how far in the future to schedule the retry. Should be short */
-#define RETRY_INTERVAL (0.1 * CLOCK_SECOND)
+#define RETRY_INTERVAL (0.05 * CLOCK_SECOND)
 
 /* How long to wait before sleeping after starting the coap post */
 /* will also sleep if a response to the post is recieved */
@@ -77,12 +77,17 @@ static dht_result_t dht_current;
 
 /* sink state */
 static uint8_t sink_ok = 0;
+/* if sink hostname lookup is ok */
+static uint8_t resolv_ok = 0;
 /* sink's ip address */
 static uip_ipaddr_t *sink_addr;
 /* number of wakes */
 static uint8_t wakes = 0;
 /* number of failed checks */
 static uint8_t sink_checks_failed = 0;
+
+/* flag tracks if this is the first post */
+static uint8_t first_post = 1;
 
 /* this is the corrected battery voltage */
 /* the TH12 has a boost converter and so adc_vbatt cannot be used */
@@ -102,6 +107,9 @@ static clock_time_t next_post;
 
 /* used to go to sleep */
 static struct ctimer ct_sleep;
+
+/* flag to test if con has failed or not */
+static uint8_t con_ok;
 
 char buf[256];
 
@@ -197,50 +205,131 @@ client_chunk_handler(void *response)
   ctimer_stop(&ct_sleep);
   int len = coap_get_payload(response, &chunk);
   printf("|%.*s", len, (char *)chunk);
-  if (sink_ok = 0 && len != 0 ) { 
+
+  if (len != 0) {
     sink_ok = 1;
     sink_checks_failed = 0;
-  } else {
-    sink_checks_failed++;
-  }
+  } 
+
   go_to_sleep(NULL);
+}
+
+static rpl_dag_t *dag;
+
+PROCESS(resolv_sink, "resolv sink hostname");
+PROCESS_THREAD(resolv_sink, ev, data)
+{  
+
+  PROCESS_BEGIN();
+  
+  dag = NULL;
+
+  while (dag == NULL ) {
+
+    PROCESS_PAUSE();
+    
+    dag = rpl_get_any_dag();
+    
+    if (dag != NULL ) {
+      uip_ipaddr_t *addr;
+      gpio_set(GPIO_43);
+      PRINTF("joined DAG.\n");
+      
+      PRINTF("Trying to resolv %s\n", sink_name);
+      resolv_query(sink_name);
+      
+      PROCESS_WAIT_EVENT();
+      
+      if(ev == resolv_event_found) {
+	PRINTF("resolv_event_found\n");
+	
+	if(resolv_lookup(sink_name, &sink_addr) == RESOLV_STATUS_CACHED) {
+	  PRINT6ADDR(sink_addr);
+	  PRINTF("\n\r");
+	  resolv_ok = 1;
+	} else {
+	  PRINTF("host not found\n\r");
+	  resolv_ok = 0;
+	}
+	
+      }			
+    }
+  }
+  
+  PROCESS_END();
+}
+
+static process_event_t ev_post_con_started, ev_post_complete;
+
+PROCESS(dummy, "dummy");
+PROCESS_THREAD(dummy, ev, data)
+{
+  PROCESS_BEGIN();
+  PRINTF("dummy\n");
+  static coap_packet_t request[1]; /* This way the packet can be treated as pointer as usual. */
+  coap_init_message(request, COAP_TYPE_CON, COAP_POST, 0 );
+  coap_set_header_uri_path(request, "/th12");
+  coap_set_payload(request, buf, strlen(buf));
+  COAP_BLOCKING_REQUEST(sink_addr, REMOTE_PORT, request, client_chunk_handler);
+  PRINTF("dummy done\n");
+  PROCESS_END();
 }
 
 PROCESS(do_post, "post results");
 PROCESS_THREAD(do_post, ev, data)
 {
-	PROCESS_BEGIN();
-	static coap_packet_t request[1]; /* This way the packet can be treated as pointer as usual. */
+  static uint8_t doing_con;
 
-	PRINTF("do post\n\r");
+  PROCESS_BEGIN();
+  static coap_packet_t request[1]; /* This way the packet can be treated as pointer as usual. */
+    
+  PRINTF("do post\n\r");
+  
+  /* we do a NON post since a CON could take 60 seconds to time out and we don't want to stay awake that long */
+  if ((wakes % WAKE_CYCLES_PER_SINK_CHECK) == 0) {
+    PRINTF("sink check with CON\n");
+    resolv_ok = 0; sink_ok = 0;
+    process_start(&resolv_sink, NULL);
+    coap_init_message(request, COAP_TYPE_CON, COAP_POST, 0 );
+    con_ok = 0;
+    process_post(&th_12, ev_post_con_started, NULL);
+  } else {
+    PRINTF("NON post\n");
+    coap_init_message(request, COAP_TYPE_NON, COAP_POST, 0 );
+  }
+  coap_set_header_uri_path(request, "/th12");
+  
+  coap_set_payload(request, buf, strlen(buf));
+  
+  /* there is no good way to know if a NON request has finished */
+  /* if it sucessful we might get a response back in client_chuck_handler */
+  /* if we don't get a response back then we need to timeout and go back to sleep (potentially for a longer time than normal) */
+  /* in fact, we don't really care about the response at all. A response just lets us go to sleep quicker (maybe) */
+  /* the request should really go out within 50ms, so we will wait for that and then sleep */
+  /* a one hop request will probably come back faster... */
+  
+  if (sink_ok == 1) {
+    ctimer_set(&ct_sleep, SLEEP_AFTER_POST, go_to_sleep, NULL);
+  }
+  
+  while (resolv_ok == 0 ) {
+    PROCESS_PAUSE();
+  }
+  
+  COAP_BLOCKING_REQUEST(sink_addr, REMOTE_PORT, request, client_chunk_handler);
+  PRINTF("status %u: %s\n", coap_error_code, coap_error_message);
+  if (con_ok == 0) {
+    PRINTF("CON failed\n");
+    sink_checks_failed++;
+  }
 
-	/* we do a NON post since a CON could take 60 seconds to time out and we don't want to stay awake that long */
-	if (wakes % WAKE_CYCLES_PER_SINK_CHECK == 0) {
-	  coap_init_message(request, COAP_TYPE_CON, COAP_POST, 0 );
-	  sink_ok = 0;
-	} else {
-	  coap_init_message(request, COAP_TYPE_NON, COAP_POST, 0 );
-	}
-	coap_set_header_uri_path(request, "/th12");
-	
-	coap_set_payload(request, buf, strlen(buf));
+  process_post(&th_12, ev_post_complete, NULL);
 
-	/* there is no good way to know if a NON request has finished */
-	/* if it sucessful we might get a response back in client_chuck_handler */
-	/* if we don't get a response back then we need to timeout and go back to sleep (potentially for a longer time than normal) */
-	/* in fact, we don't really care about the response at all. A response just lets us go to sleep quicker (maybe) */
-	/* the request should really go out within 50ms, so we will wait for that and then sleep */
-	/* a one hop request will probably come back faster... */
-
-	if (sink_ok == 1) {
-	  ctimer_set(&ct_sleep, SLEEP_AFTER_POST, go_to_sleep, NULL);
-	}
-
-	COAP_BLOCKING_REQUEST(sink_addr, REMOTE_PORT, request, client_chunk_handler);
-	PRINTF("status %u: %s\n", coap_error_code, coap_error_message);
-	
-	PROCESS_END();
+  
+  PROCESS_END();
 }
+
+static process_event_t ev_sensor_retry_request;
 
 void do_result( dht_result_t d) {
 	uint16_t frac_t, int_t;
@@ -275,14 +364,16 @@ void do_result( dht_result_t d) {
 		
 		create_dht_msg(&d, buf);
 		
+		/* NON posts leave the do_post process hanging around */
+		/* kill it so we can start another */
+		process_exit(&do_post);
 		process_start(&do_post, NULL);
 
 	} else {
 		PRINTF("bad checksum\n\r");
 		if(sensor_tries < SENSOR_RETRIES) {
 			PRINTF("retry sensor\n\r");
-			next_post = clock_time() + RETRY_INTERVAL;
-			etimer_set(&et_do_dht, RETRY_INTERVAL);
+			process_post(&th_12, ev_sensor_retry_request, NULL);
 		} else {
 			PRINTF("too many sensor retries, giving up.\n\r");
 			go_to_sleep(NULL);
@@ -314,14 +405,19 @@ led_off(void *ptr)
 	gpio_reset(KBI5);
 }
 
-static rpl_dag_t *dag;
-
 PROCESS_THREAD(th_12, ev, data)
 {
 
 	PROCESS_BEGIN();
 
+	ev_post_con_started = process_alloc_event();
+	ev_post_complete = process_alloc_event();
+	ev_sensor_retry_request = process_alloc_event();
+
 	/* Initialize the REST engine. */
+	/* You need one of these */
+	/* Otherwise things will "work" but fail in insidious ways */
+//	coap_receiver_init();
 	rest_init_engine();
 
 	rplinfo_activate_resources();
@@ -365,54 +461,20 @@ PROCESS_THREAD(th_12, ev, data)
 	
 	ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
 
+	process_start(&resolv_sink, NULL);
+
 	while(1) {
-	  
-	  if(dag == NULL || sink_ok == 0 || (wakes % WAKE_CYCLES_PER_SINK_CHECK == 0)) {
-	    uint8_t do_post;
-	    if (dag == NULL || sink_ok ==0) {
-	      do_post = 1;
-	    }
-	    dag = rpl_get_any_dag();
-	    if (dag != NULL) {
-	      uip_ipaddr_t *addr;
-	      gpio_set(GPIO_43);
-	      PRINTF("joined DAG.\n");
-	      
-	      PRINTF("Trying to resolv %s\n", sink_name);
-	      resolv_query(sink_name);
-	      
-	      PROCESS_WAIT_EVENT();
-	      
-	      if(ev == resolv_event_found) {
-		PRINTF("resolv_event_found\n");
 
-		if(resolv_lookup(sink_name, &sink_addr) == RESOLV_STATUS_CACHED) {
-		  PRINT6ADDR(sink_addr);
-		  PRINTF("\n\r");	    
-		} else {
-		  PRINTF("host not found\n\r");
-		  sink_ok = 0;
-		}
-
-	      }				
-	      /* queue up a post to get some instant satisfaction */
-	      if (do_post == 1) {
-		etimer_set(&et_do_dht, 1 * CLOCK_SECOND);
-	      }
-	    }
-	    
-	    PROCESS_PAUSE();
-	    
-	  } else {
-	    PROCESS_WAIT_EVENT();
-	  }
-			
+	  PROCESS_WAIT_EVENT();
+	  	 
 	  if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
-	    wakes++;
-	    PRINTF("post schedule\n\r");
+	    PRINTF("do_dht expired\n\r");
 	    PRINTF("sink_ok %d wakes %d failed %d\n\r", sink_ok, wakes, sink_checks_failed); 
+	    PRINTF("mod %d\n", wakes % WAKE_CYCLES_PER_SINK_CHECK);	    
 	    next_post = clock_time() + POST_INTERVAL;
 	    etimer_set(&et_do_dht, POST_INTERVAL);
+
+	    wakes++;
 	    
 	    if(sleep_ok == 1) {
 	      dht_init();
@@ -426,6 +488,25 @@ PROCESS_THREAD(th_12, ev, data)
 	    sensor_tries = 0;
 	    process_start(&read_dht, NULL);
 	  }
+
+	  if ( ev == ev_post_con_started) {
+	    etimer_stop(&et_do_dht);
+	    PRINTF("stopping do_dht timer: waiting for CON to complete\n\r");
+	  }
+
+	  if( ev == ev_post_complete ) {
+	    next_post = clock_time() + POST_INTERVAL;
+	    etimer_set(&et_do_dht, POST_INTERVAL);
+	    PRINTF("do_dht scheduled\n");
+	    go_to_sleep(NULL);
+	  }
+
+	  if ( ev == ev_sensor_retry_request ) {
+	    next_post = clock_time() + RETRY_INTERVAL;
+	    etimer_set(&et_do_dht, RETRY_INTERVAL);
+	    PRINTF("sensor failed schedule retry\n");
+	  }
+
 	  
 	} 
 	
