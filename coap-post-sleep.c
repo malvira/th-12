@@ -28,7 +28,7 @@
 
 /* stay awake for this long on power up */
 //#define ON_POWER_WAKE_TIME (120 * CLOCK_SECOND)
-#define ON_POWER_WAKE_TIME (1200 * CLOCK_SECOND)
+#define ON_POWER_WAKE_TIME (120 * CLOCK_SECOND)
 
 /* hostname for the sink */
 static char sink_name[40] = "coap.lowpan.com";
@@ -237,7 +237,6 @@ PROCESS_THREAD(resolv_sink, ev, data)
     
     if (dag != NULL ) {
       uip_ipaddr_t *addr;
-      gpio_set(GPIO_43);
       PRINTF("joined DAG.\n");
       
       PRINTF("Trying to resolv %s\n", sink_name);
@@ -252,6 +251,9 @@ PROCESS_THREAD(resolv_sink, ev, data)
 	  PRINT6ADDR(sink_addr);
 	  PRINTF("\n\r");
 	  resolv_ok = 1;
+	  if (sleep_ok != 1) {
+	    gpio_set(GPIO_43);
+	  }
 	} else {
 	  PRINTF("host not found\n\r");
 	  resolv_ok = 0;
@@ -473,7 +475,11 @@ PROCESS_THREAD(th_12, ev, data)
 	
 	ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
 
-	process_start(&resolv_sink, NULL);
+	/* report an initial sample */
+	/* this will be a "sink check" and will wait for a DAG to be found and force a sink resolv */
+	/* XXX fixme */
+	/* currently, this will block if no DAG can be found... */
+	process_start(&read_dht, NULL);
 
 	while(1) {
 
