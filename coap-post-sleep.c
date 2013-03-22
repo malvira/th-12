@@ -78,7 +78,7 @@ static dht_result_t dht_current;
 /* sink state */
 static uint8_t sink_ok = 0;
 /* if sink hostname lookup is ok */
-static uint8_t resolv_ok = 0;
+static int8_t resolv_ok = 0;
 /* sink's ip address */
 static uip_ipaddr_t *sink_addr;
 /* number of wakes */
@@ -209,6 +209,7 @@ client_chunk_handler(void *response)
   if (len != 0) {
     sink_ok = 1;
     sink_checks_failed = 0;
+    con_ok = 1;
   } 
 
   go_to_sleep(NULL);
@@ -216,11 +217,15 @@ client_chunk_handler(void *response)
 
 static rpl_dag_t *dag;
 
+static process_event_t ev_resolv_failed;
+
 PROCESS(resolv_sink, "resolv sink hostname");
 PROCESS_THREAD(resolv_sink, ev, data)
 {  
 
   PROCESS_BEGIN();
+
+  ev_resolv_failed = process_alloc_event();
   
   dag = NULL;
 
@@ -250,6 +255,7 @@ PROCESS_THREAD(resolv_sink, ev, data)
 	} else {
 	  PRINTF("host not found\n\r");
 	  resolv_ok = 0;
+	  process_post(&do_post, ev_resolv_failed, NULL);
 	}
 	
       }			
@@ -288,7 +294,7 @@ PROCESS_THREAD(do_post, ev, data)
   /* we do a NON post since a CON could take 60 seconds to time out and we don't want to stay awake that long */
   if ((wakes % WAKE_CYCLES_PER_SINK_CHECK) == 0) {
     PRINTF("sink check with CON\n");
-    resolv_ok = 0; sink_ok = 0;
+    resolv_ok = -1; sink_ok = 0;
     process_start(&resolv_sink, NULL);
     coap_init_message(request, COAP_TYPE_CON, COAP_POST, 0 );
     con_ok = 0;
@@ -312,8 +318,14 @@ PROCESS_THREAD(do_post, ev, data)
     ctimer_set(&ct_sleep, SLEEP_AFTER_POST, go_to_sleep, NULL);
   }
   
-  while (resolv_ok == 0 ) {
+  while (resolv_ok == -1) {
     PROCESS_PAUSE();
+    if (resolv_ok == 0) {
+      PRINTF("resolv failed\n");
+      sink_checks_failed++;
+      process_post(&th_12, ev_post_complete, NULL);
+      PROCESS_EXIT();
+    }
   }
   
   COAP_BLOCKING_REQUEST(sink_addr, REMOTE_PORT, request, client_chunk_handler);
