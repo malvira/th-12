@@ -63,6 +63,9 @@ static uint8_t sensor_tries;
 /* should be as short as possible */
 #define SLEEP_AFTER_POST (0.05 * CLOCK_SECOND)
 
+/* give up waiting for a dag after DAG_TIMEOUT */
+#define DAG_TIMEOUT (20 * CLOCK_SECOND)
+
 /* debug */
 #define DEBUG DEBUG_FULL
 #include "net/uip-debug.h"
@@ -218,6 +221,7 @@ client_chunk_handler(void *response)
 static rpl_dag_t *dag;
 
 static process_event_t ev_resolv_failed;
+static process_event_t ev_post_con_started, ev_post_complete;
 
 PROCESS(resolv_sink, "resolv sink hostname");
 PROCESS_THREAD(resolv_sink, ev, data)
@@ -225,11 +229,14 @@ PROCESS_THREAD(resolv_sink, ev, data)
 
   PROCESS_BEGIN();
 
+  static struct timer t_get_dag_timeout;
+  timer_set(&t_get_dag_timeout, DAG_TIMEOUT);
+
   ev_resolv_failed = process_alloc_event();
   
   dag = NULL;
 
-  while (dag == NULL ) {
+  while (dag == NULL && !timer_expired(&t_get_dag_timeout)) {
 
     PROCESS_PAUSE();
     
@@ -260,14 +267,19 @@ PROCESS_THREAD(resolv_sink, ev, data)
 	  process_post(&do_post, ev_resolv_failed, NULL);
 	}
 	
+	PROCESS_EXIT();
+
       }			
     }
   }
   
+  if (timer_expired(&t_get_dag_timeout) ) {
+    PRINTF("DAG timed out\n\r");
+    process_post(&th_12, ev_post_complete, NULL);
+  }
+
   PROCESS_END();
 }
-
-static process_event_t ev_post_con_started, ev_post_complete;
 
 PROCESS(dummy, "dummy");
 PROCESS_THREAD(dummy, ev, data)
@@ -477,8 +489,6 @@ PROCESS_THREAD(th_12, ev, data)
 
 	/* report an initial sample */
 	/* this will be a "sink check" and will wait for a DAG to be found and force a sink resolv */
-	/* XXX fixme */
-	/* currently, this will block if no DAG can be found... */
 	process_start(&read_dht, NULL);
 
 	while(1) {
