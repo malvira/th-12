@@ -23,12 +23,14 @@
 #include "th-12.h"
 #include "dht.h"
 
+/* with 2 min post interval, sink checks every 4th wake, and up to 3 sink failures before reboot */
+/* node should recover with in 8 min. Worst case would be 24min and triggering a reboot */ 
+
 /* how long to wait between posts */
-#define POST_INTERVAL (30 * CLOCK_SECOND)
+#define POST_INTERVAL (120 * CLOCK_SECOND)
 
 /* stay awake for this long on power up */
-//#define ON_POWER_WAKE_TIME (120 * CLOCK_SECOND)
-#define ON_POWER_WAKE_TIME (1200 * CLOCK_SECOND)
+#define ON_POWER_WAKE_TIME (120 * CLOCK_SECOND)
 
 /* hostname for the sink */
 static char sink_name[40] = "coap.lowpan.com";
@@ -40,10 +42,10 @@ static char sink_name[40] = "coap.lowpan.com";
 /* a sink check is a CON post instead of a NON */
 /* the check is ok if the node gets a confirmation */
 /* a bad resolve will also set sink_ok to 0 */
-#define WAKE_CYCLES_PER_SINK_CHECK 3
+#define WAKE_CYCLES_PER_SINK_CHECK 4
 
 /* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
-#define SINK_CHECK_TRIES 1
+#define SINK_CHECK_TRIES 3
 
 /* only report the battery voltage after */
 /* the th12 has been running for BATTERY_DELAY */
@@ -52,7 +54,7 @@ static char sink_name[40] = "coap.lowpan.com";
 #define BATTERY_DELAY (100 * CLOCK_SECOND)
 
 /* try to reread the sensor this many times if it reports a bad checksum before giving up */
-#define SENSOR_RETRIES (3)
+#define SENSOR_RETRIES 3
 static uint8_t sensor_tries;
 
 /* how far in the future to schedule the retry. Should be short */
