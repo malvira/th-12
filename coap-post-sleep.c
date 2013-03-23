@@ -114,6 +114,10 @@ static struct ctimer ct_sleep;
 /* flag to test if con has failed or not */
 static uint8_t con_ok;
 
+/* track if we are doing a sensor retry or not */
+static uint8_t retry = 0;
+
+
 char buf[256];
 
 uint16_t create_dht_msg(dht_result_t *d, char *buf)
@@ -429,6 +433,7 @@ void do_result( dht_result_t d) {
 			process_post(&th_12, ev_sensor_retry_request, NULL);
 		} else {
 			PRINTF("too many sensor retries, giving up.\n\r");
+			retry = 0;
 			create_error_msg("sensor failed", buf);
 			process_exit(&do_post);
 			process_start(&do_post, NULL);
@@ -462,7 +467,6 @@ led_off(void *ptr)
 
 PROCESS_THREAD(th_12, ev, data)
 {
-  static uint8_t retry = 0;
 
   PROCESS_BEGIN();
 
@@ -527,7 +531,7 @@ PROCESS_THREAD(th_12, ev, data)
 
     if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
       PRINTF("do_dht expired\n\r");
-      PRINTF("sink_ok %d wakes %d failed %d\n\r", sink_ok, wakes, sink_checks_failed);
+      PRINTF("sink_ok %d wakes %d failed %d retry %d\n\r", sink_ok, wakes, sink_checks_failed, retry);
       PRINTF("mod %d\n", wakes % WAKE_CYCLES_PER_SINK_CHECK);
       next_post = clock_time() + POST_INTERVAL;
       etimer_set(&et_do_dht, POST_INTERVAL);
