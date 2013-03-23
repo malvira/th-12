@@ -308,7 +308,6 @@ PROCESS_THREAD(resolv_sink, ev, data)
   if (timer_expired(&t_get_dag_timeout) ) {
     PRINTF("DAG timed out\n\r");
     resolv_ok = 0;
-    process_post(&th_12, ev_post_complete, NULL);
   }
 
   PROCESS_END();
