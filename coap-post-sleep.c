@@ -27,13 +27,18 @@
 /* node should recover with in 8 min. Worst case would be 24min and triggering a reboot */ 
 
 /* how long to wait between posts */
-#define POST_INTERVAL (120 * CLOCK_SECOND)
+static uint8_t post_interval = 120;
 
 /* stay awake for this long on power up */
-#define ON_POWER_WAKE_TIME (120 * CLOCK_SECOND)
+static uint8_t wake_time = 120;
 
 /* hostname for the sink */
-static char sink_name[40] = "coap.lowpan.com";
+#define SINK_MAXLEN 40
+static char sink_name[SINK_MAXLEN + 1] = "coap.lowpan.com";
+static char sink_path[SINK_MAXLEN + 1] = "/th12";
+
+/* whether or not the sensor is allowed to sleep */
+static uint8_t sleep_allowed = 1;
 
 /* perform a sink check this number of wake cycles */
 /* 0 will always do a sink check */
@@ -42,10 +47,10 @@ static char sink_name[40] = "coap.lowpan.com";
 /* a sink check is a CON post instead of a NON */
 /* the check is ok if the node gets a confirmation */
 /* a bad resolve will also set sink_ok to 0 */
-#define WAKE_CYCLES_PER_SINK_CHECK 4
+static uint8_t posts_per_check = 4;
 
 /* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
-#define SINK_CHECK_TRIES 3
+static uint8_t max_post_fails = 3;
 
 /* only report the battery voltage after */
 /* the th12 has been running for BATTERY_DELAY */
@@ -77,6 +82,8 @@ static uint8_t sensor_tries;
 PROCESS(th_12, "Temp/Humid Sensor");
 AUTOSTART_PROCESSES(&th_12, &resolv_process);
 
+static void set_sleep_ok(void *ptr);
+static struct ctimer ct_powerwake;
 struct etimer et_do_dht, et_poweron_timeout;
 static dht_result_t dht_current;
 
@@ -119,6 +126,91 @@ static uint8_t con_ok;
 /* track if we are doing a sensor retry or not */
 static uint8_t retry = 0;
 
+/* other things we need */
+static rpl_dag_t *dag;
+static process_event_t ev_resolv_failed;
+static process_event_t ev_post_con_started, ev_post_complete;
+
+
+RESOURCE(sink, METHOD_GET | METHOD_POST , "sink", "title=\"Sink hostname\";rt=\"Data\"");
+
+void
+sink_handler(void* request, void* response, uint8_t *buffer, uint16_t preferred_size, int32_t *offset)
+{
+  uint8_t *old;
+  size_t len = 0;
+  const char *uri;
+
+  /* refresh the wake timer */
+  ctimer_set(&ct_powerwake, wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
+
+  if ((len = REST.get_query_variable(request, "uri", &uri))) {
+    if (strncmp(uri, "netloc", len) == 0) {
+      old = sink_name;
+    } else if(strncmp(uri,"path", len) == 0) {
+      old = sink_path;
+    }
+  }
+
+  if (REST.get_method_type(request) == METHOD_POST) {
+    const uint8_t *new;
+    REST.get_request_payload(request, &new);
+    strncpy(old, new, SINK_MAXLEN);
+    sink_ok = 0; resolv_ok = 0; wakes = 0;
+    process_start(&read_dht, NULL);
+  } else {
+    strncpy(buffer, old, SINK_MAXLEN);
+    REST.set_response_payload(response, buffer, strlen(old));
+  }
+}
+
+RESOURCE(config, METHOD_GET | METHOD_POST , "config", "title=\"Config parameters\";rt=\"Data\"");
+
+/* can do */
+/* times */
+/* POST_INTERVAL = interval       */
+/* ON_POWER_WAKE_TIME = wake_time */
+/* SINK CHECKs interval = posts_per_check */
+/* SINK check failures =  max_post_fails */
+/* SLEEP OK = sleep_allowed */
+void
+config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferred_size, int32_t *offset)
+{
+  uint8_t *param;
+  const char *pstr;
+  size_t len = 0;
+
+  /* refresh the wake timer */
+  ctimer_set(&ct_powerwake, wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
+  
+  if ((len = REST.get_query_variable(request, "param", &pstr))) {
+    if (strncmp(pstr, "interval", len) == 0) {
+      param = &post_interval;
+      /* send a post_complete event to schedule a post with the new interval */
+      process_post(&th_12, ev_post_complete, NULL);
+    } else if(strncmp(pstr, "wake_time", len) == 0) {
+      param = &wake_time;
+      ctimer_set(&ct_powerwake, wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
+    } else if(strncmp(pstr, "posts_per_check", len) == 0) {
+      param = &posts_per_check;
+    } else if(strncmp(pstr, "max_post_fails", len) == 0) {
+      param = &max_post_fails;
+    } else if(strncmp(pstr, "sleep_allowed", len) == 0) {
+      param = &sleep_allowed;
+    }
+  }
+
+  if (REST.get_method_type(request) == METHOD_POST) {
+    const uint8_t *new;
+    REST.get_request_payload(request, &new);
+    *param = (uint8_t)atoi(new);
+  } else {
+    uint8_t n;
+    n = sprintf(buffer, "%d", *param);
+    REST.set_response_payload(response, buffer, n);
+  }
+  
+}
 
 char buf[256];
 
@@ -253,11 +345,6 @@ client_chunk_handler(void *response)
   go_to_sleep(NULL);
 }
 
-static rpl_dag_t *dag;
-
-static process_event_t ev_resolv_failed;
-static process_event_t ev_post_con_started, ev_post_complete;
-
 PROCESS(resolv_sink, "resolv sink hostname");
 PROCESS_THREAD(resolv_sink, ev, data)
 {
@@ -313,20 +400,6 @@ PROCESS_THREAD(resolv_sink, ev, data)
   PROCESS_END();
 }
 
-PROCESS(dummy, "dummy");
-PROCESS_THREAD(dummy, ev, data)
-{
-  PROCESS_BEGIN();
-  PRINTF("dummy\n");
-  static coap_packet_t request[1]; /* This way the packet can be treated as pointer as usual. */
-  coap_init_message(request, COAP_TYPE_CON, COAP_POST, 0 );
-  coap_set_header_uri_path(request, "/th12");
-  coap_set_payload(request, buf, strlen(buf));
-  COAP_BLOCKING_REQUEST(sink_addr, REMOTE_PORT, request, client_chunk_handler);
-  PRINTF("dummy done\n");
-  PROCESS_END();
-}
-
 PROCESS(do_post, "post results");
 PROCESS_THREAD(do_post, ev, data)
 {
@@ -338,7 +411,7 @@ PROCESS_THREAD(do_post, ev, data)
   PRINTF("do post\n\r");
 
   /* we do a NON post since a CON could take 60 seconds to time out and we don't want to stay awake that long */
-  if (!resolv_ok || (wakes % WAKE_CYCLES_PER_SINK_CHECK) == 0) {
+  if (!resolv_ok || (wakes % posts_per_check ) == 0) {
     PRINTF("sink check with CON\n");
     resolv_ok = -1; sink_ok = 0;
     process_start(&resolv_sink, NULL);
@@ -349,7 +422,7 @@ PROCESS_THREAD(do_post, ev, data)
     PRINTF("NON post\n");
     coap_init_message(request, COAP_TYPE_NON, COAP_POST, 0 );
   }
-  coap_set_header_uri_path(request, "/th12");
+  coap_set_header_uri_path(request, sink_path);
 
   coap_set_payload(request, buf, strlen(buf));
 
@@ -443,14 +516,15 @@ void do_result( dht_result_t d) {
 
 }
 
-static struct ctimer ct_powerwake;
 static void
 set_sleep_ok(void *ptr)
 {
 	PRINTF("Power ON wake timeout expired. Ok to sleep\n\r");
 	gpio_reset(GPIO_43);
-	sleep_ok = 1;
-	go_to_sleep(NULL);
+	if (sleep_allowed) {
+	  sleep_ok = 1;
+	  go_to_sleep(NULL);
+	}
 }
 
 static void
@@ -481,7 +555,9 @@ PROCESS_THREAD(th_12, ev, data)
 //	coap_receiver_init();
   rest_init_engine();
 
-  rplinfo_activate_resources();
+//  rplinfo_activate_resources();
+  rest_activate_resource(&resource_sink);
+  rest_activate_resource(&resource_config);
 
   register_dht_result(do_result);
 
@@ -506,8 +582,8 @@ PROCESS_THREAD(th_12, ev, data)
   adc_setup_chan(5);
   adc_setup_chan(6);
 
-  etimer_set(&et_do_dht, POST_INTERVAL);
-  ctimer_set(&ct_powerwake, ON_POWER_WAKE_TIME, set_sleep_ok, NULL);
+  etimer_set(&et_do_dht, post_interval * CLOCK_SECOND);
+  ctimer_set(&ct_powerwake, wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
   ctimer_set(&ct_report_batt, BATTERY_DELAY, set_report_batt_ok, NULL);
 
   /* turn on RED led on power up for 2 secs. then turn off */
@@ -533,11 +609,11 @@ PROCESS_THREAD(th_12, ev, data)
     if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
       PRINTF("do_dht expired\n\r");
       PRINTF("sink_ok %d wakes %d failed %d retry %d\n\r", sink_ok, wakes, sink_checks_failed, retry);
-      PRINTF("mod %d\n", wakes % WAKE_CYCLES_PER_SINK_CHECK);
-      next_post = clock_time() + POST_INTERVAL;
-      etimer_set(&et_do_dht, POST_INTERVAL);
+      PRINTF("mod %d\n", wakes % posts_per_check);
+      next_post = clock_time() + post_interval * CLOCK_SECOND;
+      etimer_set(&et_do_dht, post_interval * CLOCK_SECOND);
 
-      if (sink_checks_failed >= SINK_CHECK_TRIES) {
+      if (sink_checks_failed >= max_post_fails) {
 	if(vbatt > 2700) {
 	  PRINTF("max sink failures reached, rebooting\n\r");
 	  CRM->SW_RST = 0x87651234;
@@ -575,8 +651,8 @@ PROCESS_THREAD(th_12, ev, data)
     }
 
     if( ev == ev_post_complete ) {
-      next_post = clock_time() + POST_INTERVAL;
-      etimer_set(&et_do_dht, POST_INTERVAL);
+      next_post = clock_time() + post_interval * CLOCK_SECOND;
+      etimer_set(&et_do_dht, post_interval * CLOCK_SECOND);
       retry = 0;
       PRINTF("do_dht scheduled\n");
       go_to_sleep(NULL);
@@ -588,8 +664,6 @@ PROCESS_THREAD(th_12, ev, data)
       etimer_set(&et_do_dht, RETRY_INTERVAL);
       PRINTF("sensor failed schedule retry\n");
     }
-
-
   }
 
   PROCESS_END();
