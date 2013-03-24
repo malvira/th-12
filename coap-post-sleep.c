@@ -674,13 +674,11 @@ PROCESS_THREAD(th_12, ev, data)
 
   ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
 
-  etimer_set(&et_do_dht, th12_cfg.post_interval * CLOCK_SECOND);
+  /* do an initial post on startup */
+  /* this will be a "sink check" and will wait for a DAG to be found and force a sink resolv */
+  etimer_set(&et_do_dht, 5 * CLOCK_SECOND);
   ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
   ctimer_set(&ct_report_batt, BATTERY_DELAY, set_report_batt_ok, NULL);
-
-  /* report an initial sample */
-  /* this will be a "sink check" and will wait for a DAG to be found and force a sink resolv */
-  process_start(&read_dht, NULL);
 
   while(1) {
 
