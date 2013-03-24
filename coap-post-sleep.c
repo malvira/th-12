@@ -257,28 +257,49 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
   if ((len = REST.get_query_variable(request, "param", &pstr))) {
     if (strncmp(pstr, "interval", len) == 0) {
       param = &th12_cfg.post_interval;
-      /* send a post_complete event to schedule a post with the new interval */
-      process_post(&th_12, ev_post_complete, NULL);
     } else if(strncmp(pstr, "wake_time", len) == 0) {
       param = &th12_cfg.wake_time;
-      ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
     } else if(strncmp(pstr, "posts_per_check", len) == 0) {
       param = &th12_cfg.posts_per_check;
     } else if(strncmp(pstr, "max_post_fails", len) == 0) {
       param = &th12_cfg.max_post_fails;
     } else if(strncmp(pstr, "sleep_allowed", len) == 0) {
       param = &th12_cfg.sleep_allowed;
+    } else if(strncmp(pstr, "channel", len) == 0) {
+      param = &mc1322x_config.channel;
     }
   }
 
   if (REST.get_method_type(request) == METHOD_POST) {
     const uint8_t *new;
     REST.get_request_payload(request, &new);
-    *param = (uint8_t)atoi(new);
+    if(strncmp(pstr, "channel", len) == 0) {
+      *param = (uint8_t)atoi(new) - 11;
+    } else {
+      *param = (uint8_t)atoi(new);
+    }
     th12_config_save(&th12_cfg);
+    
+    /* do clean-up actions */
+    if (strncmp(pstr, "interval", len) == 0) {
+      /* send a post_complete event to schedule a post with the new interval */
+      process_post(&th_12, ev_post_complete, NULL);
+    } else if(strncmp(pstr, "wake_time", len) == 0) {
+      ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
+    } else if(strncmp(pstr, "channel", len) == 0) {
+      set_channel(mc1322x_config.channel);
+      mc1322x_config_save(&mc1322x_config);
+      CRM->SW_RST = 0x87651234;
+      while (1) { continue; }
+    }
+
   } else {
     uint8_t n;
-    n = sprintf(buffer, "%d", *param);
+    if(strncmp(pstr, "channel", len) == 0) {
+      n = sprintf(buffer, "%d", *param + 11);
+    } else {
+      n = sprintf(buffer, "%d", *param);
+    }
     REST.set_response_payload(response, buffer, n);
   }
   
@@ -628,7 +649,7 @@ PROCESS_THREAD(th_12, ev, data)
   rest_init_engine();
 
 //  rplinfo_activate_resources();
-  rest_activate_resource(&resource_sink);
+//  rest_activate_resource(&resource_sink);
   rest_activate_resource(&resource_config);
 
   register_dht_result(do_result);
@@ -698,9 +719,9 @@ PROCESS_THREAD(th_12, ev, data)
 	  while (1) { continue; }
 	} else {
 	  /* If the battery voltage is too low, we can't reboot (has the boost will stop running) */
-	  /* what else can we do to try to recover? */
-	  /* restart RPL? */
-	  /* redo resolv? */
+	  /* restart RPL and try again... */
+	  sink_checks_failed = 0;
+	  rpl_init();
 	}
       }
 
