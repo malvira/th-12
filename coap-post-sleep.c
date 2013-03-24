@@ -18,39 +18,34 @@
 
 /* mc1322x */
 #include "mc1322x.h"
+#include "config.h"
 
 /* th-12 */
 #include "th-12.h"
 #include "dht.h"
 
+/* default POST location */
+/* hostname for the sink */
+#define DEFAULT_SINK_NAME "coap-8.lowpan.com" 
+/* path to post to */
+#define DEFAULT_SINK_PATH "/th12"
+
 /* with 2 min post interval, sink checks every 4th wake, and up to 3 sink failures before reboot */
 /* node should recover with in 8 min. Worst case would be 24min and triggering a reboot */ 
 
 /* how long to wait between posts */
-static uint8_t post_interval = 120;
-
+#define DEFAULT_POST_INTERVAL 120
 /* stay awake for this long on power up */
-static uint8_t wake_time = 120;
-
-/* hostname for the sink */
-#define SINK_MAXLEN 40
-static char sink_name[SINK_MAXLEN + 1] = "coap.lowpan.com";
-static char sink_path[SINK_MAXLEN + 1] = "/th12";
-
-/* whether or not the sensor is allowed to sleep */
-static uint8_t sleep_allowed = 1;
-
+#define DEFAULT_WAKE_TIME 120
 /* perform a sink check this number of wake cycles */
-/* 0 will always do a sink check */
-/* a post sink will automatically checked and initialized on boot */
-/* or when the sink URL has changed */
-/* a sink check is a CON post instead of a NON */
-/* the check is ok if the node gets a confirmation */
-/* a bad resolve will also set sink_ok to 0 */
-static uint8_t posts_per_check = 4;
-
+#define DEFAULT_POSTS_PER_CHECK 4
 /* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
-static uint8_t max_post_fails = 3;
+#define DEFAULT_MAX_POST_FAILS 3
+/* whether or not the sensor is allowed to sleep */
+#define DEFAULT_SLEEP_ALLOWED 1
+
+/* MAX len for paths and hostnames */
+#define SINK_MAXLEN 31
 
 /* only report the battery voltage after */
 /* the th12 has been running for BATTERY_DELAY */
@@ -132,6 +127,88 @@ static process_event_t ev_resolv_failed;
 static process_event_t ev_post_con_started, ev_post_complete;
 
 
+/* flash config */
+/* MAX len for paths and hostnames */
+#define SINK_MAXLEN 31
+
+#define TH12_CONFIG_PAGE 0x1D000 /* nvm page where conf will be stored */
+#define TH12_CONFIG_VERSION 1
+#define TH12_CONFIG_MAGIC 0x5448
+
+/* th12 config */
+typedef struct {
+  uint16_t magic; /* th12 magic number 0x5448 */
+  uint16_t version; /* th12 config version number */
+  uint8_t sink_name[SINK_MAXLEN + 1]; /* hostname for the sink */
+  uint8_t sink_path[SINK_MAXLEN + 1]; /* path to post to */
+  uint8_t post_interval; /* how long to wait between posts */
+  uint8_t wake_time; /* stay awake for this long on power up */
+  uint8_t posts_per_check; /* perform a sink check this number of wake cycles */
+  uint8_t sleep_allowed; /* whether or not the sensor is allowed to sleep */
+  uint8_t max_post_fails; /* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
+} TH12Config;
+
+static TH12Config th12_cfg;
+
+void 
+th12_config_set_default(TH12Config *c) 
+{
+  c->magic = TH12_CONFIG_MAGIC;
+  c->version = TH12_CONFIG_VERSION;
+  strncpy(c->sink_name, DEFAULT_SINK_NAME, SINK_MAXLEN);
+  strncpy(c->sink_path, DEFAULT_SINK_PATH, SINK_MAXLEN);
+  c->post_interval = DEFAULT_POST_INTERVAL;
+  c->wake_time = DEFAULT_WAKE_TIME;
+  c->posts_per_check = DEFAULT_POSTS_PER_CHECK;
+  c->sleep_allowed = DEFAULT_SLEEP_ALLOWED;
+  c->max_post_fails = DEFAULT_MAX_POST_FAILS;
+}
+
+/* write out config to flash */
+void th12_config_save(TH12Config *c) {
+	nvmErr_t err;
+	err = nvm_erase(gNvmInternalInterface_c, mc1322x_config.flags.nvmtype, 1 << TH12_CONFIG_PAGE/4096);
+	err = nvm_write(gNvmInternalInterface_c, mc1322x_config.flags.nvmtype, (uint8_t *)c, TH12_CONFIG_PAGE, sizeof(TH12Config));
+}
+
+/* load the config from flash to the pass conf structure */
+void th12_config_restore(TH12Config *c) {
+	nvmErr_t err;
+	nvmType_t type;
+	if (mc1322x_config.flags.nvmtype == 0) { 
+	  nvm_detect(gNvmInternalInterface_c, &type); 
+	  mc1322x_config.flags.nvmtype = type;
+	}
+	err = nvm_read(gNvmInternalInterface_c, mc1322x_config.flags.nvmtype, c, TH12_CONFIG_PAGE, sizeof(TH12Config));
+}
+
+/* check the flash for magic number and proper version */
+int th12_config_valid(TH12Config *c) {
+	if (c->magic == TH12_CONFIG_MAGIC &&
+	    c->version == TH12_CONFIG_VERSION) {
+		return 1;
+	} else {
+#if DEBUG
+		if (c->magic != TH12_CONFIG_MAGIC) { PRINTF("th12 config bad magic %04x\n\r", c->magic); }
+		if (c->version != TH12_CONFIG_MAGIC) { PRINTF("th12 config bad version %04x\n\r", c->version); }
+#endif
+		return 0;
+	}
+}
+
+void th12_config_print(void) {
+	PRINTF("th12 config:\n\r");
+	PRINTF("  magic:    %04x\n\r", th12_cfg.magic);
+	PRINTF("  version:  %d\n\r",   th12_cfg.version);
+	PRINTF("  sink name: %s\n\r", th12_cfg.sink_name);
+	PRINTF("  sink path: %s\n\r",   th12_cfg.sink_path);
+	PRINTF("  interval: %d\n\r",   th12_cfg.post_interval);
+	PRINTF("  wake time: %d\n\r",   th12_cfg.wake_time);
+	PRINTF("  posts per check: %d\n\r",   th12_cfg.posts_per_check);
+	PRINTF("  max post fails: %d\n\r",   th12_cfg.max_post_fails);
+	PRINTF("  sleep allowed: %d\n\r",   th12_cfg.sleep_allowed);
+}
+
 RESOURCE(sink, METHOD_GET | METHOD_POST , "sink", "title=\"Sink hostname\";rt=\"Data\"");
 
 void
@@ -142,13 +219,13 @@ sink_handler(void* request, void* response, uint8_t *buffer, uint16_t preferred_
   const char *uri;
 
   /* refresh the wake timer */
-  ctimer_set(&ct_powerwake, wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
+  ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
 
   if ((len = REST.get_query_variable(request, "uri", &uri))) {
     if (strncmp(uri, "netloc", len) == 0) {
-      old = sink_name;
+      old = th12_cfg.sink_name;
     } else if(strncmp(uri,"path", len) == 0) {
-      old = sink_path;
+      old = th12_cfg.sink_path;
     }
   }
 
@@ -157,6 +234,7 @@ sink_handler(void* request, void* response, uint8_t *buffer, uint16_t preferred_
     REST.get_request_payload(request, &new);
     strncpy(old, new, SINK_MAXLEN);
     sink_ok = 0; resolv_ok = 0; wakes = 0;
+    th12_config_save(&th12_cfg);
     process_start(&read_dht, NULL);
   } else {
     strncpy(buffer, old, SINK_MAXLEN);
@@ -166,13 +244,6 @@ sink_handler(void* request, void* response, uint8_t *buffer, uint16_t preferred_
 
 RESOURCE(config, METHOD_GET | METHOD_POST , "config", "title=\"Config parameters\";rt=\"Data\"");
 
-/* can do */
-/* times */
-/* POST_INTERVAL = interval       */
-/* ON_POWER_WAKE_TIME = wake_time */
-/* SINK CHECKs interval = posts_per_check */
-/* SINK check failures =  max_post_fails */
-/* SLEEP OK = sleep_allowed */
 void
 config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferred_size, int32_t *offset)
 {
@@ -181,22 +252,22 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
   size_t len = 0;
 
   /* refresh the wake timer */
-  ctimer_set(&ct_powerwake, wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
+  ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
   
   if ((len = REST.get_query_variable(request, "param", &pstr))) {
     if (strncmp(pstr, "interval", len) == 0) {
-      param = &post_interval;
+      param = &th12_cfg.post_interval;
       /* send a post_complete event to schedule a post with the new interval */
       process_post(&th_12, ev_post_complete, NULL);
     } else if(strncmp(pstr, "wake_time", len) == 0) {
-      param = &wake_time;
-      ctimer_set(&ct_powerwake, wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
+      param = &th12_cfg.wake_time;
+      ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
     } else if(strncmp(pstr, "posts_per_check", len) == 0) {
-      param = &posts_per_check;
+      param = &th12_cfg.posts_per_check;
     } else if(strncmp(pstr, "max_post_fails", len) == 0) {
-      param = &max_post_fails;
+      param = &th12_cfg.max_post_fails;
     } else if(strncmp(pstr, "sleep_allowed", len) == 0) {
-      param = &sleep_allowed;
+      param = &th12_cfg.sleep_allowed;
     }
   }
 
@@ -204,6 +275,7 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
     const uint8_t *new;
     REST.get_request_payload(request, &new);
     *param = (uint8_t)atoi(new);
+    th12_config_save(&th12_cfg);
   } else {
     uint8_t n;
     n = sprintf(buffer, "%d", *param);
@@ -368,15 +440,15 @@ PROCESS_THREAD(resolv_sink, ev, data)
       uip_ipaddr_t *addr;
       PRINTF("joined DAG.\n");
 
-      PRINTF("Trying to resolv %s\n", sink_name);
-      resolv_query(sink_name);
+      PRINTF("Trying to resolv %s\n", th12_cfg.sink_name);
+      resolv_query(th12_cfg.sink_name);
 
       PROCESS_WAIT_EVENT();
 
       if(ev == resolv_event_found) {
 	PRINTF("resolv_event_found\n");
 
-	if(resolv_lookup(sink_name, &sink_addr) == RESOLV_STATUS_CACHED) {
+	if(resolv_lookup(th12_cfg.sink_name, &sink_addr) == RESOLV_STATUS_CACHED) {
 	  PRINT6ADDR(sink_addr);
 	  PRINTF("\n\r");
 	  resolv_ok = 1;
@@ -411,7 +483,7 @@ PROCESS_THREAD(do_post, ev, data)
   PRINTF("do post\n\r");
 
   /* we do a NON post since a CON could take 60 seconds to time out and we don't want to stay awake that long */
-  if (!resolv_ok || (wakes % posts_per_check ) == 0) {
+  if (!resolv_ok || (wakes % th12_cfg.posts_per_check ) == 0) {
     PRINTF("sink check with CON\n");
     resolv_ok = -1; sink_ok = 0;
     process_start(&resolv_sink, NULL);
@@ -422,7 +494,7 @@ PROCESS_THREAD(do_post, ev, data)
     PRINTF("NON post\n");
     coap_init_message(request, COAP_TYPE_NON, COAP_POST, 0 );
   }
-  coap_set_header_uri_path(request, sink_path);
+  coap_set_header_uri_path(request, th12_cfg.sink_path);
 
   coap_set_payload(request, buf, strlen(buf));
 
@@ -521,7 +593,7 @@ set_sleep_ok(void *ptr)
 {
 	PRINTF("Power ON wake timeout expired. Ok to sleep\n\r");
 	gpio_reset(GPIO_43);
-	if (sleep_allowed) {
+	if (th12_cfg.sleep_allowed) {
 	  sleep_ok = 1;
 	  go_to_sleep(NULL);
 	}
@@ -582,10 +654,6 @@ PROCESS_THREAD(th_12, ev, data)
   adc_setup_chan(5);
   adc_setup_chan(6);
 
-  etimer_set(&et_do_dht, post_interval * CLOCK_SECOND);
-  ctimer_set(&ct_powerwake, wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
-  ctimer_set(&ct_report_batt, BATTERY_DELAY, set_report_batt_ok, NULL);
-
   /* turn on RED led on power up for 2 secs. then turn off */
   GPIO->FUNC_SEL.KBI5 = 3;
   GPIO->PAD_DIR_SET.KBI5 = 1;
@@ -596,7 +664,19 @@ PROCESS_THREAD(th_12, ev, data)
   GPIO->PAD_DIR_SET.GPIO_43 = 1;
   gpio_reset(GPIO_43);
 
+  /* get the config from flash or make a default config */
+  th12_config_restore(&th12_cfg);
+  if (!th12_config_valid(&th12_cfg)) {
+    th12_config_set_default(&th12_cfg);
+    th12_config_save(&th12_cfg);
+  }
+  th12_config_print();
+
   ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
+
+  etimer_set(&et_do_dht, th12_cfg.post_interval * CLOCK_SECOND);
+  ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
+  ctimer_set(&ct_report_batt, BATTERY_DELAY, set_report_batt_ok, NULL);
 
   /* report an initial sample */
   /* this will be a "sink check" and will wait for a DAG to be found and force a sink resolv */
@@ -609,11 +689,11 @@ PROCESS_THREAD(th_12, ev, data)
     if(ev == PROCESS_EVENT_TIMER && etimer_expired(&et_do_dht)) {
       PRINTF("do_dht expired\n\r");
       PRINTF("sink_ok %d wakes %d failed %d retry %d\n\r", sink_ok, wakes, sink_checks_failed, retry);
-      PRINTF("mod %d\n", wakes % posts_per_check);
-      next_post = clock_time() + post_interval * CLOCK_SECOND;
-      etimer_set(&et_do_dht, post_interval * CLOCK_SECOND);
+      PRINTF("mod %d\n", wakes % th12_cfg.posts_per_check);
+      next_post = clock_time() + th12_cfg.post_interval * CLOCK_SECOND;
+      etimer_set(&et_do_dht, th12_cfg.post_interval * CLOCK_SECOND);
 
-      if (sink_checks_failed >= max_post_fails) {
+      if (sink_checks_failed >= th12_cfg.max_post_fails) {
 	if(vbatt > 2700) {
 	  PRINTF("max sink failures reached, rebooting\n\r");
 	  CRM->SW_RST = 0x87651234;
@@ -651,8 +731,8 @@ PROCESS_THREAD(th_12, ev, data)
     }
 
     if( ev == ev_post_complete ) {
-      next_post = clock_time() + post_interval * CLOCK_SECOND;
-      etimer_set(&et_do_dht, post_interval * CLOCK_SECOND);
+      next_post = clock_time() + th12_cfg.post_interval * CLOCK_SECOND;
+      etimer_set(&et_do_dht, th12_cfg.post_interval * CLOCK_SECOND);
       retry = 0;
       PRINTF("do_dht scheduled\n");
       go_to_sleep(NULL);
