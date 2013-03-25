@@ -4,4 +4,7 @@
 #define RPL_CONF_LEAF_ONLY 1
 #define RESOLV_CONF_SUPPORTS_MDNS 0
 
+#define UIP_CONF_DS6_NBR_NBU     4
+#define UIP_CONF_DS6_ROUTE_NBU   0
+
 #endif

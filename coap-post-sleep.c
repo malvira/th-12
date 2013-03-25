@@ -209,39 +209,6 @@ void th12_config_print(void) {
 	PRINTF("  sleep allowed: %d\n\r",   th12_cfg.sleep_allowed);
 }
 
-RESOURCE(sink, METHOD_GET | METHOD_POST , "sink", "title=\"Sink hostname\";rt=\"Data\"");
-
-void
-sink_handler(void* request, void* response, uint8_t *buffer, uint16_t preferred_size, int32_t *offset)
-{
-  uint8_t *old;
-  size_t len = 0;
-  const char *uri;
-
-  /* refresh the wake timer */
-  ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
-
-  if ((len = REST.get_query_variable(request, "uri", &uri))) {
-    if (strncmp(uri, "netloc", len) == 0) {
-      old = th12_cfg.sink_name;
-    } else if(strncmp(uri,"path", len) == 0) {
-      old = th12_cfg.sink_path;
-    }
-  }
-
-  if (REST.get_method_type(request) == METHOD_POST) {
-    const uint8_t *new;
-    REST.get_request_payload(request, &new);
-    strncpy(old, new, SINK_MAXLEN);
-    sink_ok = 0; resolv_ok = 0; wakes = 0;
-    th12_config_save(&th12_cfg);
-    process_start(&read_dht, NULL);
-  } else {
-    strncpy(buffer, old, SINK_MAXLEN);
-    REST.set_response_payload(response, buffer, strlen(old));
-  }
-}
-
 RESOURCE(config, METHOD_GET | METHOD_POST , "config", "title=\"Config parameters\";rt=\"Data\"");
 
 void
@@ -267,7 +234,15 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
       param = &th12_cfg.sleep_allowed;
     } else if(strncmp(pstr, "channel", len) == 0) {
       param = &mc1322x_config.channel;
+    } else if (strncmp(pstr, "netloc", len) == 0) {
+      param = th12_cfg.sink_name;
+    } else if(strncmp(pstr, "path", len) == 0) {
+      param = th12_cfg.sink_path;
+    } else {
+      goto bad;
     }
+  } else {
+    goto bad;
   }
 
   if (REST.get_method_type(request) == METHOD_POST) {
@@ -275,7 +250,10 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
     REST.get_request_payload(request, &new);
     if(strncmp(pstr, "channel", len) == 0) {
       *param = (uint8_t)atoi(new) - 11;
-    } else {
+    } else if ( (strncmp(pstr, "netloc", len) == 0) || 
+		(strncmp(pstr, "path", len) == 0) ) {
+      strncpy(param, new, SINK_MAXLEN);
+    }  else {
       *param = (uint8_t)atoi(new);
     }
     th12_config_save(&th12_cfg);
@@ -286,6 +264,10 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
       process_post(&th_12, ev_post_complete, NULL);
     } else if(strncmp(pstr, "wake_time", len) == 0) {
       ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
+    } else if ( (strncmp(pstr, "netloc", len) == 0) || 
+		(strncmp(pstr, "path", len) == 0) ) {
+      sink_ok = 0; resolv_ok = 0; wakes = 0;
+      process_start(&read_dht, NULL);
     } else if(strncmp(pstr, "channel", len) == 0) {
       set_channel(mc1322x_config.channel);
       mc1322x_config_save(&mc1322x_config);
@@ -293,16 +275,25 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
       while (1) { continue; }
     }
 
-  } else {
+  } else { /* GET */
     uint8_t n;
-    if(strncmp(pstr, "channel", len) == 0) {
+    if (strncmp(pstr, "channel", len) == 0) {
       n = sprintf(buffer, "%d", *param + 11);
+    } else if ( (strncmp(pstr, "netloc", len) == 0) || 
+		(strncmp(pstr, "path", len) == 0) ) {
+      strncpy(buffer, param, SINK_MAXLEN);
+      REST.set_response_payload(response, buffer, strlen(param));
     } else {
       n = sprintf(buffer, "%d", *param);
     }
     REST.set_response_payload(response, buffer, n);
   }
-  
+
+  return;
+
+bad:
+  REST.set_response_status(response, REST.status.BAD_REQUEST);
+
 }
 
 char buf[256];
