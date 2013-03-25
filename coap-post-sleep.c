@@ -86,8 +86,6 @@ static dht_result_t dht_current;
 static uint8_t sink_ok = 0;
 /* if sink hostname lookup is ok */
 static int8_t resolv_ok = 0;
-/* sink's ip address */
-static uip_ipaddr_t *sink_addr;
 /* number of wakes */
 static uint8_t wakes = 0;
 /* number of failed checks */
@@ -146,6 +144,8 @@ typedef struct {
   uint8_t posts_per_check; /* perform a sink check this number of wake cycles */
   uint8_t sleep_allowed; /* whether or not the sensor is allowed to sleep */
   uint8_t max_post_fails; /* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
+/* sink's ip address */
+  uip_ipaddr_t sink_addr;
 } TH12Config;
 
 static TH12Config th12_cfg;
@@ -207,6 +207,35 @@ void th12_config_print(void) {
 	PRINTF("  posts per check: %d\n\r",   th12_cfg.posts_per_check);
 	PRINTF("  max post fails: %d\n\r",   th12_cfg.max_post_fails);
 	PRINTF("  sleep allowed: %d\n\r",   th12_cfg.sleep_allowed);
+	PRINTF("  ip addr: ");
+	PRINT6ADDR(&th12_cfg.sink_addr);
+	PRINTF("\n\r");	
+}
+
+int
+ipaddr_sprint(char *s, const uip_ipaddr_t *addr)
+{
+  uint16_t a;
+  unsigned int i;
+  int f;
+  int n;
+  n = 0;
+  for(i = 0, f = 0; i < sizeof(uip_ipaddr_t); i += 2) {
+    a = (addr->u8[i] << 8) + addr->u8[i + 1];
+    if(a == 0 && f >= 0) {
+      if(f++ == 0) {
+	n += sprintf(&s[n], "::");
+      }
+    } else {
+      if(f > 0) {
+        f = -1;
+      } else if(i > 0) {
+	n += sprintf(&s[n], ":");
+      }
+      n += sprintf(&s[n], "%x", a); 
+    }
+  }
+  return n;
 }
 
 RESOURCE(config, METHOD_GET | METHOD_POST , "config", "title=\"Config parameters\";rt=\"Data\"");
@@ -215,6 +244,7 @@ void
 config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferred_size, int32_t *offset)
 {
   uint8_t *param;
+  uip_ipaddr_t *new_addr;
   const char *pstr;
   size_t len = 0;
 
@@ -238,6 +268,8 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
       param = th12_cfg.sink_name;
     } else if(strncmp(pstr, "path", len) == 0) {
       param = th12_cfg.sink_path;
+    } else if(strncmp(pstr, "ip", len) == 0) {
+      new_addr = &th12_cfg.sink_addr;
     } else {
       goto bad;
     }
@@ -253,6 +285,9 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
     } else if ( (strncmp(pstr, "netloc", len) == 0) || 
 		(strncmp(pstr, "path", len) == 0) ) {
       strncpy(param, new, SINK_MAXLEN);
+    } else if(strncmp(pstr, "ip", len) == 0) {
+      uiplib_ipaddrconv(new, new_addr);
+      PRINT6ADDR(new_addr);      
     }  else {
       *param = (uint8_t)atoi(new);
     }
@@ -265,7 +300,8 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
     } else if(strncmp(pstr, "wake_time", len) == 0) {
       ctimer_set(&ct_powerwake, th12_cfg.wake_time * CLOCK_SECOND, set_sleep_ok, NULL);
     } else if ( (strncmp(pstr, "netloc", len) == 0) || 
-		(strncmp(pstr, "path", len) == 0) ) {
+		(strncmp(pstr, "path", len) == 0)  ||
+		(strncmp(pstr, "ip", len) == 0) ) {
       sink_ok = 0; resolv_ok = 0; wakes = 0;
       process_start(&read_dht, NULL);
     } else if(strncmp(pstr, "channel", len) == 0) {
@@ -283,6 +319,8 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
 		(strncmp(pstr, "path", len) == 0) ) {
       strncpy(buffer, param, SINK_MAXLEN);
       REST.set_response_payload(response, buffer, strlen(param));
+    } else if ( (strncmp(pstr, "ip", len) == 0)) {
+      n = ipaddr_sprint(buffer, &th12_cfg.sink_addr);
     } else {
       n = sprintf(buffer, "%d", *param);
     }
@@ -458,10 +496,12 @@ PROCESS_THREAD(resolv_sink, ev, data)
       PROCESS_WAIT_EVENT();
 
       if(ev == resolv_event_found) {
+	uip_ipaddr_t *addr;
 	PRINTF("resolv_event_found\n");
 
-	if(resolv_lookup(th12_cfg.sink_name, &sink_addr) == RESOLV_STATUS_CACHED) {
-	  PRINT6ADDR(sink_addr);
+	addr = &(th12_cfg.sink_addr);
+	if(resolv_lookup(th12_cfg.sink_name, &addr) == RESOLV_STATUS_CACHED) {
+	  PRINT6ADDR(addr);
 	  PRINTF("\n\r");
 	  resolv_ok = 1;
 	} else {
@@ -498,7 +538,14 @@ PROCESS_THREAD(do_post, ev, data)
   if (!resolv_ok || (wakes % th12_cfg.posts_per_check ) == 0) {
     PRINTF("sink check with CON\n");
     resolv_ok = -1; sink_ok = 0;
-    process_start(&resolv_sink, NULL);
+    if (strncmp("", th12_cfg.sink_name, SINK_MAXLEN) == 0) {
+      PRINTF("sink name null, trying with ip ");
+      PRINT6ADDR(&th12_cfg.sink_addr);
+      PRINTF("\n\r");
+      resolv_ok = 1;
+    } else {
+      process_start(&resolv_sink, NULL);
+    }
     coap_init_message(request, COAP_TYPE_CON, COAP_POST, 0 );
     con_ok = 0;
     process_post(&th_12, ev_post_con_started, NULL);
@@ -531,7 +578,7 @@ PROCESS_THREAD(do_post, ev, data)
     }
   }
 
-  COAP_BLOCKING_REQUEST(sink_addr, REMOTE_PORT, request, client_chunk_handler);
+  COAP_BLOCKING_REQUEST(&th12_cfg.sink_addr, REMOTE_PORT, request, client_chunk_handler);
   PRINTF("status %u: %s\n", coap_error_code, coap_error_message);
   if (con_ok == 0) {
     PRINTF("CON failed\n");
@@ -640,7 +687,6 @@ PROCESS_THREAD(th_12, ev, data)
   rest_init_engine();
 
 //  rplinfo_activate_resources();
-//  rest_activate_resource(&resource_sink);
   rest_activate_resource(&resource_config);
 
   register_dht_result(do_result);
