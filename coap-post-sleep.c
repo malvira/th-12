@@ -501,7 +501,8 @@ PROCESS_THREAD(resolv_sink, ev, data)
 
 	addr = &(th12_cfg.sink_addr);
 	if(resolv_lookup(th12_cfg.sink_name, &addr) == RESOLV_STATUS_CACHED) {
-	  PRINT6ADDR(addr);
+	  memcpy(&th12_cfg.sink_addr, addr, sizeof(uip_ipaddr_t));
+	  PRINT6ADDR(&th12_cfg.sink_addr);
 	  PRINTF("\n\r");
 	  resolv_ok = 1;
 	} else {
