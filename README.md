@@ -1,35 +1,57 @@
 Demonstration Firmware for the TH12
 ===================================
 
-coap-post
----------
+Getting the code
+----------------
 
-This program is a simple "always on" RPL node with full routing. No
-power managment is done of any kind so therefore the batteries will
-only last a few days.
+```
+    git clone https://github.com/malvira/th-12.git
+    git submodule init
+    git submodule update
+```
 
-The node will recieve an IPv6 prefix from the RPL network that it
-joins. Once this happens, it will post its sensor data as JSON to the
-following:
+Building the code
+-----------------
 
-coap://[prefix::1]
+### Get the Toolchain
+   * [Linux/Windows](https://github.com/malvira/libmc1322x/wiki/toolchain)
+   * [OSX](https://github.com/malvira/libmc1322x/wiki/mac) 
 
+### Build
 
-coap-post-sleep
----------------
+```
+    cd th-12
+    make
+```
 
-This is a modified version of the simpler `coap-post` program. When
-first powered up, the node stays on for ON_POWER_WAKE_TIME (default
-300 seconds). This gives you a chance to probe the node (such as query
-its rplinfo resources) or whatever.
+This will produce the binaries that get loaded on the TH-12 hardware.
 
-After ON_POWER_WAKE_TIME has expired, two things can happen. If the
-node has joined a DAG, it will go to sleep until it is time to take a
-sample and post its data. If it hasn't joined a DAG, then the node
-will sleep for NO_DAG_SLEEP_TIME (default 300 seconds), and then stay
-on for LOOKING_FOR_DAG_SLEEP_TIME (default 10 seconds) while it
-retries to find a RPL network. If it has joined a DAG, then the node
-sleeps for POST_INTERVAL, then posts the data and repeates.
+Load on to TH12 Hardware
+------------------------
+
+Load and flash on to the TH12 using the PROG12 programming pod and the
+tools in [libmc1322x](https://github.com/malvira/libmc1322x). The
+PROG12 and tag-connect pinout uses the BBMC "redbee-econotag" layout.
+
+```
+    mc1322x-load -f coap-post-sleep_th12-lowpower.bin -t /dev/ttyUSB1 -c 'bbmc -l redbee-econotag erase'
+```
+
+Will load the main program in to RAM and execute it. To flash it so it persists over resets and power cycles:
+
+```
+    mc1322x-load -f flasher_m12.bin -s coap-post-sleep_th12-lowpower.bin -t /dev/ttyUSB1 -c 'bbmc -l redbee-econotag erase'
+```
+
+** PLEASE NOTE** __ to flash the m12 you **MUST** use the m12 build of
+   flasher. This is in the m12 branch of libmc1322x. run make
+   BOARD=m12__
+
+Documentation
+-------------
+
+Please see the
+[TH12 Wiki[(https://github.com/malvira/th-12/wiki) for detailed documentation about how to use the **coap-post-sleep** firmware.
 
 License
 =======
