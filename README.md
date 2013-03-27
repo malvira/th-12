@@ -43,15 +43,15 @@ Will load the main program in to RAM and execute it. To flash it so it persists 
     mc1322x-load -f flasher_m12.bin -s coap-post-sleep_th12-lowpower.bin -t /dev/ttyUSB1 -c 'bbmc -l redbee-econotag erase'
 ```
 
-** PLEASE NOTE** __ to flash the m12 you **MUST** use the m12 build of
-   flasher. This is in the m12 branch of libmc1322x. run make
-   BOARD=m12__
+**PLEASE NOTE** __to flash the m12 you__ **MUST** __use the m12 build of__
+   __flasher. This is in the m12 branch of libmc1322x. run make__
+   __BOARD=m12__
 
 Documentation
 -------------
 
 Please see the
-[TH12 Wiki[(https://github.com/malvira/th-12/wiki) for detailed documentation about how to use the **coap-post-sleep** firmware.
+[TH12 Wiki](https://github.com/malvira/th-12/wiki) for detailed documentation about how to use the **coap-post-sleep** firmware.
 
 License
 =======
