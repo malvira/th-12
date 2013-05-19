@@ -114,7 +114,7 @@ int main(void) {
 		mc1322x_config.eui = (0x0050C2A8Cull << 24) | (*MACA_RANDOM & (0xffffff));
 #else
 		/* construct mac from serial number */
-		mc1322x_config.eui = (0xEC473C4D12ull << 24) | M12_SERIAL;
+		mc1322x_config.eui = (0xEC473C5448ull << 24) | M12_SERIAL;
 #endif
 		mc1322x_config_save(&mc1322x_config);		
 	} 
