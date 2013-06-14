@@ -28,7 +28,7 @@
 /* hostname for the sink */
 #define DEFAULT_SINK_NAME "coap-8.lowpan.com" 
 /* path to post to */
-#define DEFAULT_SINK_PATH "/th12"
+#define DEFAULT_SINK_PATH "/sink"
 
 /* with 2 min post interval, sink checks every 4th wake, and up to 3 sink failures before reboot */
 /* node should recover with in 8 min. Worst case would be 24min and triggering a reboot */ 
@@ -66,7 +66,7 @@ static uint8_t sensor_tries;
 #define SLEEP_AFTER_POST (0.05 * CLOCK_SECOND)
 
 /* give up waiting for a dag after DAG_TIMEOUT */
-#define DAG_TIMEOUT (20 * CLOCK_SECOND)
+#define DAG_TIMEOUT (DEFAULT_WAKE_TIME * CLOCK_SECOND)
 
 /* debug */
 #define DEBUG DEBUG_FULL
@@ -139,11 +139,11 @@ typedef struct {
   uint16_t version; /* th12 config version number */
   uint8_t sink_name[SINK_MAXLEN + 1]; /* hostname for the sink */
   uint8_t sink_path[SINK_MAXLEN + 1]; /* path to post to */
-  uint8_t post_interval; /* how long to wait between posts */
-  uint8_t wake_time; /* stay awake for this long on power up */
-  uint8_t posts_per_check; /* perform a sink check this number of wake cycles */
-  uint8_t sleep_allowed; /* whether or not the sensor is allowed to sleep */
-  uint8_t max_post_fails; /* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
+  uint16_t post_interval; /* how long to wait between posts */
+  uint16_t wake_time; /* stay awake for this long on power up */
+  uint16_t posts_per_check; /* perform a sink check this number of wake cycles */
+  uint16_t sleep_allowed; /* whether or not the sensor is allowed to sleep */
+  uint16_t max_post_fails; /* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
 /* sink's ip address */
   uip_ipaddr_t sink_addr;
 } TH12Config;
@@ -243,7 +243,7 @@ RESOURCE(config, METHOD_GET | METHOD_POST , "config", "title=\"Config parameters
 void
 config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferred_size, int32_t *offset)
 {
-  uint8_t *param;
+  void *param;
   uip_ipaddr_t *new_addr;
   const char *pstr;
   size_t len = 0;
@@ -281,7 +281,7 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
     const uint8_t *new;
     REST.get_request_payload(request, &new);
     if(strncmp(pstr, "channel", len) == 0) {
-      *param = (uint8_t)atoi(new) - 11;
+      *(uint8_t *)param = (uint8_t)atoi(new) - 11;
     } else if ( (strncmp(pstr, "netloc", len) == 0) || 
 		(strncmp(pstr, "path", len) == 0) ) {
       strncpy(param, new, SINK_MAXLEN);
@@ -289,7 +289,7 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
       uiplib_ipaddrconv(new, new_addr);
       PRINT6ADDR(new_addr);      
     }  else {
-      *param = (uint8_t)atoi(new);
+      *(uint16_t *)param = (uint16_t)atoi(new);
     }
     th12_config_save(&th12_cfg);
     
@@ -314,7 +314,7 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
   } else { /* GET */
     uint8_t n;
     if (strncmp(pstr, "channel", len) == 0) {
-      n = sprintf(buffer, "%d", *param + 11);
+      n = sprintf(buffer, "%d", *(uint8_t *)param + 11);
     } else if ( (strncmp(pstr, "netloc", len) == 0) || 
 		(strncmp(pstr, "path", len) == 0) ) {
       strncpy(buffer, param, SINK_MAXLEN);
@@ -322,7 +322,7 @@ config_handler(void* request, void* response, uint8_t *buffer, uint16_t preferre
     } else if ( (strncmp(pstr, "ip", len) == 0)) {
       n = ipaddr_sprint(buffer, &th12_cfg.sink_addr);
     } else {
-      n = sprintf(buffer, "%d", *param);
+      n = sprintf(buffer, "%d", *(uint16_t *)param);
     }
     REST.set_response_payload(response, buffer, n);
   }
@@ -357,15 +357,7 @@ uint16_t create_dht_msg(dht_result_t *d, char *buf)
 	}
 
 	/* {"eui":"ec473c4d12bdd1ce","t":" 22.1C","h":"18.3%","vb":"2678mV"} */
-	n += sprintf(&(buf[n]),"{\"eui\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"t\":\"%c%d.%dC\",\"h\":\"%d.%d%%\"",
-		     addr->u8[0],
-		     addr->u8[1],
-		     addr->u8[2],
-		     addr->u8[3],
-		     addr->u8[4],
-		     addr->u8[5],
-		     addr->u8[6],
-		     addr->u8[7],
+	n += sprintf(&(buf[n]),"{\"t\":\"%c%d.%dC\",\"h\":\"%d.%d%%\"",
 		     neg,
 		     int_t,
 		     frac_t,
@@ -393,15 +385,7 @@ uint16_t create_error_msg(char *error, char *buf)
 	addr = &rimeaddr_node_addr;
 
 	/* {"eui":"ec473c4d12bdd1ce","err":"sensor failed"} */
-	n += sprintf(&(buf[n]),"{\"eui\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"err\":\"%s\"}",
-		     addr->u8[0],
-		     addr->u8[1],
-		     addr->u8[2],
-		     addr->u8[3],
-		     addr->u8[4],
-		     addr->u8[5],
-		     addr->u8[6],
-		     addr->u8[7],
+	n += sprintf(&(buf[n]),"{\"err\":\"%s\"}",
 		     error
 		);
 
@@ -731,7 +715,7 @@ PROCESS_THREAD(th_12, ev, data)
   }
   th12_config_print();
 
-  ctimer_set(&ct_ledoff, 2 * CLOCK_SECOND, led_off, NULL);
+  ctimer_set(&ct_ledoff, 10 * CLOCK_SECOND, led_off, NULL);
 
   /* do an initial post on startup */
   /* this will be a "sink check" and will wait for a DAG to be found and force a sink resolv */
