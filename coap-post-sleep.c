@@ -34,13 +34,13 @@
 /* node should recover with in 8 min. Worst case would be 24min and triggering a reboot */ 
 
 /* how long to wait between posts */
-#define DEFAULT_POST_INTERVAL 120
+#define DEFAULT_POST_INTERVAL 300
 /* stay awake for this long on power up */
 #define DEFAULT_WAKE_TIME 120
 /* perform a sink check this number of wake cycles */
-#define DEFAULT_POSTS_PER_CHECK 4
+#define DEFAULT_POSTS_PER_CHECK 256
 /* after SINK_CHECK_TRIES of sink check failures, the node will reboot itself */
-#define DEFAULT_MAX_POST_FAILS 3
+#define DEFAULT_MAX_POST_FAILS 1
 /* whether or not the sensor is allowed to sleep */
 #define DEFAULT_SLEEP_ALLOWED 1
 
