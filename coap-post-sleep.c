@@ -715,7 +715,7 @@ PROCESS_THREAD(th_12, ev, data)
   }
   th12_config_print();
 
-  ctimer_set(&ct_ledoff, 10 * CLOCK_SECOND, led_off, NULL);
+  ctimer_set(&ct_ledoff, 5 * CLOCK_SECOND, led_off, NULL);
 
   /* do an initial post on startup */
   /* this will be a "sink check" and will wait for a DAG to be found and force a sink resolv */
