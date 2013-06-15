@@ -671,7 +671,7 @@ PROCESS_THREAD(th_12, ev, data)
 //	coap_receiver_init();
   rest_init_engine();
 
-//  rplinfo_activate_resources();
+  rplinfo_activate_resources();
   rest_activate_resource(&resource_config);
 
   register_dht_result(do_result);
