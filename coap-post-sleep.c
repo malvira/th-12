@@ -539,7 +539,7 @@ PROCESS_THREAD(do_post, ev, data)
     coap_init_message(request, COAP_TYPE_NON, COAP_POST, 0 );
   }
   coap_set_header_uri_path(request, th12_cfg.sink_path);
-
+  coap_set_header_content_type(request, APPLICATION_JSON);
   coap_set_payload(request, buf, strlen(buf));
 
   /* there is no good way to know if a NON request has finished */
