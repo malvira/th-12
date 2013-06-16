@@ -586,7 +586,7 @@ void do_result( dht_result_t d) {
 
 	/* when the sensor returns exactly 0 for both quanties its probably a sensor failure rather that and actual reading */
 	if ((d.ok == 1) && 
-	    (d.t == 0) && (d.rh == 0)) {
+	    ((d.t != 0) && (d.rh != 0))) {
 	  
 		adc_service();
 
