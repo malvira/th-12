@@ -584,8 +584,10 @@ void do_result( dht_result_t d) {
 
 	sensor_tries++;
 
-	if (d.ok == 1) {
-
+	/* when the sensor returns exactly 0 for both quanties its probably a sensor failure rather that and actual reading */
+	if ((d.ok == 1) && 
+	    (d.t == 0) && (d.rh == 0)) {
+	  
 		adc_service();
 
 		dht_current.t = d.t;
@@ -617,19 +619,23 @@ void do_result( dht_result_t d) {
 		process_start(&do_post, NULL);
 
 	} else {
-		PRINTF("bad checksum\n\r");
-		if(sensor_tries < SENSOR_RETRIES) {
-		  PRINTF("retry sensor: %d\n\r", sensor_tries);
-			process_post(&th_12, ev_sensor_retry_request, NULL);
-		} else {
-			PRINTF("too many sensor retries, giving up.\n\r");
-			retry = 0;
-			create_error_msg("sensor failed", buf);
-			process_exit(&do_post);
-			process_start(&do_post, NULL);
-		}
+	  if (d.ok) {
+	    PRINTF("bad reading\n\r");
+	  } else {
+	    PRINTF("bad checksum\n\r");
+	  }
+	  if(sensor_tries < SENSOR_RETRIES) {
+	    PRINTF("retry sensor: %d\n\r", sensor_tries);
+	    process_post(&th_12, ev_sensor_retry_request, NULL);
+	  } else {
+	    PRINTF("too many sensor retries, giving up.\n\r");
+	    retry = 0;
+	    create_error_msg("sensor failed", buf);
+	    process_exit(&do_post);
+	    process_start(&do_post, NULL);
+	  }
 	}
-
+	
 }
 
 static void
