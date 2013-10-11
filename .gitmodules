@@ -1,9 +1,6 @@
 [submodule "contiki"]
 	path = contiki
 	url = https://github.com/malvira/contiki.git
-[submodule "apps/rplstats"]
-	path = apps/rplstats
-	url = https://github.com/malvira/rplstats.git
 [submodule "rplinfo"]
 	path = rplinfo
 	url = https://github.com/malvira/rplinfo.git
