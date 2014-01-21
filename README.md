@@ -6,6 +6,7 @@ Getting the code
 
 ```
     git clone https://github.com/malvira/th-12.git
+    cd th-12
     git submodule init
     git submodule update
 ```
